@@ -1,8 +1,15 @@
-import { registerRootComponent } from 'expo';
+import 'react-native-gesture-handler';
+import { Buffer } from 'buffer';
+import process from 'process';
 
+// Polyfills for music-metadata and other node-based libs
+global.Buffer = Buffer;
+global.process = process;
+if (!global.process.nextTick) {
+  global.process.nextTick = (fn, ...args) => setImmediate(() => fn(...args));
+}
+
+import { registerRootComponent } from 'expo';
 import App from './App';
 
-// registerRootComponent calls AppRegistry.registerComponent('main', () => App);
-// It also ensures that whether you load the app in Expo Go or in a native build,
-// the environment is set up appropriately
 registerRootComponent(App);
