@@ -278,10 +278,6 @@ export const SettingsScreen: React.FC = () => {
               <Text style={[styles.settingLabel, { color: colors.text }]}>Expo Username</Text>
               <Text style={styles.settingValue}>viki28593</Text>
             </View>
-            <View style={styles.settingRow}>
-              <Text style={[styles.settingLabel, { color: colors.text }]}>Apple Music Connect</Text>
-              <Text style={styles.settingValue}>Not Linked</Text>
-            </View>
           </>
         )}
 

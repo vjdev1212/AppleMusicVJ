@@ -2,6 +2,7 @@ import { createAudioPlayer, setAudioModeAsync, AudioPlayer, AudioStatus } from '
 import { AppState, AppStateStatus } from 'react-native';
 import { Song } from '../types';
 import { googleDriveService } from './googleDriveService';
+import { youtubeService } from './youtubeService';
 import { usePlayerStore } from '../store';
 
 class AudioService {
@@ -44,11 +45,29 @@ class AudioService {
 
       this.currentSong = song;
 
-      if (!song.url) {
+      let songUrl = song.url;
+      
+      // Resolve YouTube URL if missing
+      if (song.source === 'youtube' && !songUrl) {
+        const resolvedUrl = await youtubeService.getAudioUrl(song.id);
+        if (!resolvedUrl) {
+          throw new Error('Could not resolve YouTube audio URL');
+        }
+        songUrl = resolvedUrl;
+        // Optionally update the song object in the store/queue
+        const { queue, queueIndex } = usePlayerStore.getState();
+        if (queue[queueIndex] && queue[queueIndex].id === song.id) {
+          const updatedQueue = [...queue];
+          updatedQueue[queueIndex] = { ...queue[queueIndex], url: resolvedUrl };
+          usePlayerStore.setState({ queue: updatedQueue });
+        }
+      }
+
+      if (!songUrl) {
         throw new Error('Song URL is required');
       }
 
-      let source: any = { uri: song.url };
+      let source: any = { uri: songUrl };
       
       if (song.source === 'google-drive') {
         const token = await googleDriveService.getAccessToken();
@@ -56,7 +75,7 @@ class AudioService {
            throw new Error('Google Drive access token missing. Please sign in again.');
         }
         source = {
-          uri: song.url,
+          uri: songUrl,
           headers: {
             Authorization: `Bearer ${token}`
           }

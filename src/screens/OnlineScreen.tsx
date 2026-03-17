@@ -1,47 +1,174 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import React, { useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  FlatList,
+  Image,
+  ActivityIndicator,
+  Keyboard,
+  Dimensions,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '../hooks';
-import { SectionHeader } from '../components';
+import { BlurView } from 'expo-blur';
+import { useTheme, useAudioPlayer } from '../hooks';
 import { Spacing, FontSize, BorderRadius } from '../constants/theme';
+import { youtubeService, YouTubeSearchResult } from '../services/youtubeService';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export const OnlineScreen: React.FC = () => {
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
+  const { loadPlaylist } = useAudioPlayer();
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [results, setResults] = useState<YouTubeSearchResult[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const handleSearch = async () => {
+    if (!searchQuery.trim()) return;
+    
+    setLoading(true);
+    Keyboard.dismiss();
+    
+    try {
+      const searchResults = await youtubeService.searchVideos(searchQuery);
+      setResults(searchResults);
+    } catch (error) {
+      console.error('Search error:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const playSong = async (selectedItem: YouTubeSearchResult) => {
+    try {
+      setLoading(true);
+      const audioUrl = await youtubeService.getAudioUrl(selectedItem.id);
+      
+      if (audioUrl) {
+        const queue: any[] = results.map(item => ({
+          id: item.id,
+          title: item.title,
+          artist: item.channelTitle,
+          url: item.id === selectedItem.id ? audioUrl : '', // Only the current one has the URL for now
+          artwork: item.thumbnail,
+          source: 'youtube',
+          duration: 0,
+        }));
+
+        const startIndex = results.findIndex(r => r.id === selectedItem.id);
+        loadPlaylist(queue, startIndex);
+      }
+    } catch (error) {
+      console.error('Playback error:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const renderItem = ({ item }: { item: YouTubeSearchResult }) => (
+    <TouchableOpacity 
+      style={styles.songItem}
+      onPress={() => playSong(item)}
+      activeOpacity={0.7}
+    >
+      <View style={styles.thumbnailContainer}>
+        <Image source={{ uri: item.thumbnail }} style={styles.thumbnail} />
+        <View style={styles.playOverlay}>
+          <Ionicons name="play" size={20} color="#FFF" />
+        </View>
+      </View>
+      
+      <View style={styles.songDetails}>
+        <Text style={[styles.songTitle, { color: colors.text }]} numberOfLines={2}>
+          {item.title}
+        </Text>
+        <Text style={[styles.songMeta, { color: colors.textSecondary }]} numberOfLines={1}>
+          {item.channelTitle} • {item.duration}
+        </Text>
+      </View>
+
+      <TouchableOpacity 
+        style={styles.moreButton}
+        onPress={() => {/* Optional: Add to playlist */}}
+      >
+        <Ionicons name="ellipsis-vertical" size={20} color={colors.textSecondary} />
+      </TouchableOpacity>
+    </TouchableOpacity>
+  );
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
+      {/* Header with Search Box */}
       <View style={[styles.header, { paddingTop: insets.top + Spacing.sm }]}>
         <Text style={[styles.headerTitle, { color: colors.text }]}>Online</Text>
+        
+        <View style={styles.searchContainer}>
+          <BlurView 
+            intensity={isDark ? 40 : 60} 
+            tint={isDark ? 'dark' : 'light'} 
+            style={styles.searchBar}
+          >
+            <Ionicons name="search" size={20} color={colors.textSecondary} style={styles.searchIcon} />
+            <TextInput
+              style={[styles.searchInput, { color: colors.text }]}
+              placeholder="Search YouTube Music..."
+              placeholderTextColor={colors.textTertiary}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              onSubmitEditing={handleSearch}
+              returnKeyType="search"
+              clearButtonMode="while-editing"
+            />
+            {loading && <ActivityIndicator size="small" color={colors.primary} style={styles.loader} />}
+          </BlurView>
+        </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.placeholderContainer}>
-          <Ionicons name="globe-outline" size={80} color={colors.primary} />
-          <Text style={[styles.title, { color: colors.text }]}>Explore Music Online</Text>
-          <Text style={[styles.description, { color: colors.textSecondary }]}>
-            Connect with global music streaming services and discover new artists from around the world.
-          </Text>
-        </View>
-
-        <SectionHeader title="Coming Soon" />
-        <View style={styles.card}>
-          <Ionicons name="radio-outline" size={24} color={colors.primary} />
-          <View style={styles.cardText}>
-            <Text style={[styles.cardTitle, { color: colors.text }]}>Live Radio</Text>
-            <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>Listen to global stations 24/7</Text>
-          </View>
-        </View>
-
-        <View style={styles.card}>
-          <Ionicons name="trending-up-outline" size={24} color={colors.primary} />
-          <View style={styles.cardText}>
-            <Text style={[styles.cardTitle, { color: colors.text }]}>Trending Charts</Text>
-            <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>See what's hot today</Text>
-          </View>
-        </View>
-      </ScrollView>
+      <FlatList
+        data={results}
+        keyExtractor={(item) => item.id}
+        renderItem={renderItem}
+        contentContainerStyle={[styles.listContent, { paddingBottom: 120 }]}
+        showsVerticalScrollIndicator={false}
+        ListEmptyComponent={
+          !loading ? (
+            <View style={styles.emptyContainer}>
+              <View style={styles.emptyIconContainer}>
+                <Ionicons name="musical-notes" size={64} color={colors.primary + '40'} />
+              </View>
+              <Text style={[styles.emptyTitle, { color: colors.text }]}>
+                {searchQuery ? 'No results found' : 'Explore Music'}
+              </Text>
+              <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
+                Search for your favorite songs, artists or albums from YouTube
+              </Text>
+              
+              {!searchQuery && (
+                <View style={styles.suggestedContainer}>
+                  {['Tamil melody songs', 'Anirudh latest', 'AR Rahman hits'].map((suggestion) => (
+                    <TouchableOpacity 
+                      key={suggestion}
+                      style={[styles.suggestionChip, { backgroundColor: isDark ? colors.surface : colors.surfaceSecondary }]}
+                      onPress={() => {
+                        setSearchQuery(suggestion);
+                        setTimeout(handleSearch, 100);
+                      }}
+                    >
+                      <Text style={[styles.suggestionText, { color: colors.textSecondary }]}>{suggestion}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            </View>
+          ) : null
+        }
+      />
     </View>
   );
 };
@@ -53,48 +180,125 @@ const styles = StyleSheet.create({
   header: {
     paddingHorizontal: Spacing.md,
     paddingBottom: Spacing.md,
+    backgroundColor: 'transparent',
   },
   headerTitle: {
     fontSize: FontSize.xxxl,
     fontWeight: 'bold',
+    marginBottom: Spacing.md,
+    letterSpacing: -0.5,
   },
-  content: {
-    paddingBottom: Spacing.xxl,
+  searchContainer: {
+    height: 52,
+    borderRadius: BorderRadius.lg,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(150, 150, 150, 0.1)',
   },
-  placeholderContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 40,
-    paddingHorizontal: Spacing.xl,
-  },
-  title: {
-    fontSize: FontSize.xl,
-    fontWeight: 'bold',
-    marginTop: Spacing.lg,
-  },
-  description: {
-    fontSize: FontSize.md,
-    textAlign: 'center',
-    marginTop: Spacing.sm,
-    lineHeight: 22,
-  },
-  card: {
+  searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginHorizontal: Spacing.md,
-    padding: Spacing.md,
-    backgroundColor: 'rgba(0,0,0,0.05)',
+    paddingHorizontal: Spacing.md,
+    height: '100%',
+  },
+  searchIcon: {
+    marginRight: Spacing.sm,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: FontSize.md,
+    height: '100%',
+    fontWeight: '500',
+  },
+  loader: {
+    marginLeft: Spacing.sm,
+  },
+  listContent: {
+    paddingHorizontal: Spacing.md,
+    paddingTop: Spacing.sm,
+  },
+  songItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: Spacing.md,
+    paddingVertical: Spacing.xs,
+  },
+  thumbnailContainer: {
+    position: 'relative',
+    width: 120,
+    height: 68,
     borderRadius: BorderRadius.md,
-    marginBottom: Spacing.sm,
+    backgroundColor: '#1c1c1e',
+    overflow: 'hidden',
   },
-  cardText: {
+  thumbnail: {
+    width: '100%',
+    height: '100%',
+  },
+  playOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  songDetails: {
+    flex: 1,
     marginLeft: Spacing.md,
+    justifyContent: 'center',
   },
-  cardTitle: {
+  songTitle: {
     fontSize: FontSize.md,
     fontWeight: '600',
+    marginBottom: 4,
+    lineHeight: 18,
   },
-  cardSubtitle: {
+  songMeta: {
     fontSize: FontSize.sm,
+    letterSpacing: 0.2,
+  },
+  moreButton: {
+    padding: Spacing.sm,
+  },
+  emptyContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 100,
+  },
+  emptyIconContainer: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: 'rgba(255, 55, 95, 0.05)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: Spacing.lg,
+  },
+  emptyTitle: {
+    fontSize: FontSize.xl,
+    fontWeight: '700',
+    marginBottom: Spacing.sm,
+  },
+  emptySubtitle: {
+    fontSize: FontSize.md,
+    textAlign: 'center',
+    paddingHorizontal: Spacing.xxl,
+    lineHeight: 20,
+  },
+  suggestedContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    marginTop: Spacing.xl,
+    paddingHorizontal: Spacing.md,
+  },
+  suggestionChip: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.round,
+    margin: 4,
+  },
+  suggestionText: {
+    fontSize: FontSize.sm,
+    fontWeight: '500',
   },
 });

@@ -81,72 +81,49 @@ export const PlayerScreen: React.FC = () => {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* Background gradient */}
-      <LinearGradient
-        colors={isDark 
-          ? ['rgba(255, 55, 95, 0.3)', 'rgba(0, 0, 0, 1)']
-          : ['rgba(255, 45, 85, 0.2)', 'rgba(255, 255, 255, 1)']
-        }
-        style={StyleSheet.absoluteFill}
-      />
+      {/* Background */}
+      <View style={[styles.background, { backgroundColor: '#000000' }]} />
 
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + Spacing.sm }]}>
-        <TouchableOpacity onPress={() => navigation.canGoBack() ? navigation.goBack() : true} style={styles.backButton}>
-          <Ionicons name="chevron-down" size={28} color={colors.text} />
+        <TouchableOpacity onPress={() => navigation.canGoBack() ? navigation.goBack() : true} style={styles.headerIconButton}>
+          <Ionicons name="chevron-down" size={28} color="#FFFFFF" />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Now Playing</Text>
-        <TouchableOpacity style={styles.moreButton}>
-          <Ionicons name="ellipsis-horizontal" size={24} color={colors.text} />
+        <View style={styles.headerInfo}>
+          <Text style={styles.headerSubtitle}>PLAYING FROM</Text>
+          <Text style={styles.headerTitle} numberOfLines={1}>
+            {currentSong.source === 'youtube' ? 'YouTube Music' : 'Your Library'}
+          </Text>
+        </View>
+        <TouchableOpacity style={styles.headerIconButton}>
+          <Ionicons name="ellipsis-vertical" size={24} color="#FFFFFF" />
         </TouchableOpacity>
       </View>
 
       {/* Artwork */}
       <View style={styles.artworkContainer}>
-        <View
-          style={[
-            styles.artworkShadow,
-            {
-              shadowColor: colors.primary,
-              backgroundColor: colors.surface,
-            },
-          ]}
-        >
-          <View
-            style={[
-              styles.artwork,
-              {
-                width: ARTWORK_SIZE,
-                height: ARTWORK_SIZE,
-                backgroundColor: colors.surfaceSecondary,
-              },
-            ]}
-          >
-            {currentSong.artwork ? (
-              <Image
-                source={{ uri: currentSong.artwork }}
-                style={[styles.artworkImage, { width: ARTWORK_SIZE, height: ARTWORK_SIZE }]}
-                resizeMode="cover"
-              />
-            ) : (
-              <Image
-                source={{ uri: 'https://raw.githubusercontent.com/viki28593/assets/main/premium_music_note.png' }}
-                style={[styles.artworkImage, { width: ARTWORK_SIZE, height: ARTWORK_SIZE }]}
-                resizeMode="cover"
-              />
-            )}
-          </View>
+        <View style={styles.artworkWrapper}>
+          <Image
+            source={{ uri: currentSong.artwork || 'https://raw.githubusercontent.com/viki28593/assets/main/premium_music_note.png' }}
+            style={styles.artworkImage}
+            resizeMode="cover"
+          />
         </View>
       </View>
 
-      {/* Song Info */}
-      <View style={styles.songInfo}>
-        <Text style={[styles.songTitle, { color: colors.text }]} numberOfLines={1}>
-          {currentSong.title}
-        </Text>
-        <Text style={[styles.songArtist, { color: colors.textSecondary }]} numberOfLines={1}>
-          {currentSong.artist}
-        </Text>
+      {/* Song Info & Like */}
+      <View style={styles.songInfoContainer}>
+        <View style={styles.songTextContainer}>
+          <Text style={styles.songTitle} numberOfLines={2}>
+            {currentSong.title}
+          </Text>
+          <Text style={styles.songArtist} numberOfLines={1}>
+            {currentSong.artist}
+          </Text>
+        </View>
+        <TouchableOpacity style={styles.likeButton}>
+          <Ionicons name="heart-outline" size={28} color="#FFFFFF" />
+        </TouchableOpacity>
       </View>
 
       {/* Progress Bar */}
@@ -159,73 +136,66 @@ export const PlayerScreen: React.FC = () => {
           onSlidingStart={() => setIsDragging(true)}
           onValueChange={handleSliderChange}
           onSlidingComplete={handleSliderComplete}
-          minimumTrackTintColor={colors.primary}
-          maximumTrackTintColor={colors.surfaceSecondary}
-          thumbTintColor={colors.primary}
+          minimumTrackTintColor="#FF0000" // YT Music Red
+          maximumTrackTintColor="rgba(255, 255, 255, 0.2)"
+          thumbTintColor="#FF0000"
         />
         <View style={styles.timeContainer}>
-          <Text style={[styles.timeText, { color: colors.textSecondary }]}>
-            {formatTime(progress)}
-          </Text>
-          <Text style={[styles.timeText, { color: colors.textSecondary }]}>
-            {formatTime(duration)}
-          </Text>
+          <Text style={styles.timeText}>{formatTime(progress)}</Text>
+          <Text style={styles.timeText}>{formatTime(duration)}</Text>
         </View>
       </View>
 
       {/* Playback Controls */}
       <View style={styles.controls}>
-        {/* Shuffle */}
-        <TouchableOpacity onPress={toggleShuffle} style={styles.sideButton}>
+        <TouchableOpacity onPress={toggleShuffle} style={styles.sideControl}>
           <Ionicons
             name="shuffle"
             size={24}
-            color={shuffle ? colors.primary : colors.textSecondary}
+            color={shuffle ? '#FF0000' : 'rgba(255,255,255,0.7)'}
           />
         </TouchableOpacity>
 
-        {/* Previous */}
-        <TouchableOpacity onPress={skipToPrevious} style={styles.controlButton}>
-          <Ionicons name="play-skip-back" size={32} color={colors.text} />
+        <TouchableOpacity onPress={skipToPrevious} style={styles.mainControl}>
+          <Ionicons name="play-skip-back" size={36} color="#FFFFFF" />
         </TouchableOpacity>
 
-        {/* Play/Pause */}
         <TouchableOpacity
           onPress={togglePlayPause}
-          style={[styles.playButton, { backgroundColor: colors.primary }]}
+          style={styles.playPauseButton}
         >
-          <Ionicons
-            name={isPlaying ? 'pause' : 'play'}
-            size={36}
-            color="#FFFFFF"
-          />
+          <View style={styles.playPauseCircle}>
+            <Ionicons
+              name={isPlaying ? 'pause' : 'play'}
+              size={48}
+              color="#000000"
+            />
+          </View>
         </TouchableOpacity>
 
-        {/* Next */}
-        <TouchableOpacity onPress={skipToNext} style={styles.controlButton}>
-          <Ionicons name="play-skip-forward" size={32} color={colors.text} />
+        <TouchableOpacity onPress={skipToNext} style={styles.mainControl}>
+          <Ionicons name="play-skip-forward" size={36} color="#FFFFFF" />
         </TouchableOpacity>
 
-        {/* Repeat */}
-        <TouchableOpacity onPress={toggleRepeat} style={styles.sideButton}>
+        <TouchableOpacity onPress={toggleRepeat} style={styles.sideControl}>
           <Ionicons
-            name={getRepeatIcon()}
+            name={getRepeatIcon() === 'repeat-one' ? 'repeat-outline' : 'repeat'}
             size={24}
-            color={repeat !== 'off' ? colors.primary : colors.textSecondary}
+            color={repeat !== 'off' ? '#FF0000' : 'rgba(255,255,255,0.7)'}
           />
+          {repeat === 'one' && <Text style={styles.repeatBadge}>1</Text>}
         </TouchableOpacity>
       </View>
 
-      {/* Bottom Actions */}
-      <View style={[styles.bottomActions, { paddingBottom: insets.bottom + Spacing.md }]}>
-        <TouchableOpacity style={styles.bottomButton}>
-          <Ionicons name="heart-outline" size={24} color={colors.textSecondary} />
+      {/* Bottom Shortcuts */}
+      <View style={[styles.footer, { paddingBottom: insets.bottom + Spacing.md }]}>
+        <TouchableOpacity style={styles.footerButton}>
+          <Ionicons name="chatbubble-outline" size={22} color="rgba(255,255,255,0.7)" />
+          <Text style={styles.footerButtonText}>Lyrics</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.bottomButton}>
-          <Ionicons name="share-outline" size={24} color={colors.textSecondary} />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.bottomButton}>
-          <Ionicons name="list-outline" size={24} color={colors.textSecondary} />
+        <TouchableOpacity style={styles.footerButton}>
+          <Ionicons name="list" size={22} color="rgba(255,255,255,0.7)" />
+          <Text style={styles.footerButtonText}>Related</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -236,110 +206,166 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  background: {
+    ...StyleSheet.absoluteFillObject,
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: Spacing.md,
-    paddingBottom: Spacing.md,
+    height: 80,
   },
-  backButton: {
-    padding: Spacing.xs,
-  },
-  headerTitle: {
-    fontSize: FontSize.md,
-    fontWeight: '600',
-  },
-  moreButton: {
-    padding: Spacing.xs,
-  },
-  artworkContainer: {
-    alignItems: 'center',
-    marginTop: Spacing.lg,
-  },
-  artworkShadow: {
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.3,
-    shadowRadius: 20,
-    elevation: 10,
-  },
-  artwork: {
-    borderRadius: BorderRadius.lg,
-    overflow: 'hidden',
-  },
-  artworkImage: {
-    borderRadius: BorderRadius.lg,
-  },
-  artworkPlaceholder: {
-    flex: 1,
+  headerIconButton: {
+    width: 44,
+    height: 44,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  songInfo: {
+  headerInfo: {
+    flex: 1,
     alignItems: 'center',
-    marginTop: Spacing.xl,
-    paddingHorizontal: Spacing.lg,
+  },
+  headerSubtitle: {
+    color: 'rgba(255, 255, 255, 0.5)',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1,
+    marginBottom: 2,
+  },
+  headerTitle: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  artworkContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  artworkWrapper: {
+    width: ARTWORK_SIZE,
+    height: ARTWORK_SIZE,
+    borderRadius: 12,
+    overflow: 'hidden',
+    elevation: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+  },
+  artworkImage: {
+    width: '100%',
+    height: '100%',
+  },
+  songInfoContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.xl,
+    marginBottom: Spacing.lg,
+  },
+  songTextContainer: {
+    flex: 1,
   },
   songTitle: {
-    fontSize: FontSize.xxl,
-    fontWeight: 'bold',
-    marginBottom: Spacing.xs,
-    textAlign: 'center',
+    color: '#FFFFFF',
+    fontSize: 24,
+    fontWeight: '700',
+    marginBottom: 6,
+    lineHeight: 30,
   },
   songArtist: {
-    fontSize: FontSize.lg,
-    textAlign: 'center',
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  likeButton: {
+    marginLeft: Spacing.md,
   },
   progressContainer: {
-    marginTop: Spacing.xl,
     paddingHorizontal: Spacing.lg,
+    marginBottom: Spacing.lg,
   },
   slider: {
     width: '100%',
-    height: 40,
+    height: 30,
   },
   timeContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: -Spacing.sm,
+    marginTop: -5,
   },
   timeText: {
-    fontSize: FontSize.sm,
+    color: 'rgba(255, 255, 255, 0.5)',
+    fontSize: 12,
+    fontWeight: '500',
   },
   controls: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.xl,
+    marginBottom: Spacing.xl,
+  },
+  sideControl: {
+    width: 44,
+    height: 44,
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: Spacing.md,
-    paddingHorizontal: Spacing.lg,
+    position: 'relative',
   },
-  sideButton: {
-    padding: Spacing.md,
+  mainControl: {
+    padding: Spacing.sm,
   },
-  controlButton: {
-    padding: Spacing.md,
-    marginHorizontal: Spacing.sm,
-  },
-  playButton: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
+  playPauseButton: {
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    backgroundColor: '#FFFFFF',
     justifyContent: 'center',
+    alignItems: 'center',
+  },
+  playPauseCircle: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingLeft: 4, // Visual centering for play icon
+  },
+  repeatBadge: {
+    position: 'absolute',
+    top: 10,
+    right: 8,
+    color: '#FF0000',
+    fontSize: 9,
+    fontWeight: '900',
+  },
+  footer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingTop: Spacing.md,
+  },
+  footerButton: {
+    flexDirection: 'row',
     alignItems: 'center',
     marginHorizontal: Spacing.lg,
+    paddingVertical: Spacing.xs,
+    paddingHorizontal: Spacing.md,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.1)',
   },
-  bottomActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginTop: Spacing.xl,
-    paddingHorizontal: Spacing.xl,
-  },
-  bottomButton: {
-    padding: Spacing.md,
+  footerButtonText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 6,
   },
   noSongText: {
-    fontSize: FontSize.lg,
+    color: '#FFFFFF',
+    fontSize: 18,
     textAlign: 'center',
-    marginTop: SCREEN_HEIGHT / 2 - 50,
+    marginTop: SCREEN_HEIGHT / 2,
   },
 });

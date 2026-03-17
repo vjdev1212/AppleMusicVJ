@@ -1,0 +1,13 @@
+{
+  "name": "yt-proxy",
+  "version": "1.0.0",
+  "main": "proxy-server.js",
+  "dependencies": {
+    "express": "*",
+    "yt-dlp-exec": "*",
+    "cors": "*"
+  },
+  "scripts": {
+    "start": "node proxy-server.js"
+  }
+}

@@ -8,7 +8,7 @@ export interface Song {
   duration: number;
   artwork?: string;
   url: string;
-  source: 'google-drive' | 'streaming-url';
+  source: 'google-drive' | 'streaming-url' | 'youtube';
   fileId?: string; // Google Drive file ID
 }
 
