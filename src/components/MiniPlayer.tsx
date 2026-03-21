@@ -12,7 +12,7 @@ interface MiniPlayerProps {
 
 export const MiniPlayer: React.FC<MiniPlayerProps> = ({ onPress }) => {
   const { colors, isDark } = useTheme();
-  const { currentSong, isPlaying, togglePlayPause, currentTime, duration } = useAudioPlayer();
+  const { currentSong, isPlaying, togglePlayPause, currentTime, duration, stop } = useAudioPlayer();
 
   if (!currentSong) return null;
 
@@ -22,6 +22,13 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({ onPress }) => {
     e.stopPropagation();
     if (togglePlayPause) {
       togglePlayPause();
+    }
+  };
+
+  const handleClose = (e: any) => {
+    e.stopPropagation();
+    if (stop) {
+      stop();
     }
   };
 
@@ -60,19 +67,16 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({ onPress }) => {
                 { backgroundColor: colors.surfaceSecondary },
               ]}
             >
-              {currentSong.artwork ? (
-                <Image
-                  source={{ uri: currentSong.artwork }}
-                  style={styles.artwork}
-                  resizeMode="cover"
-                />
-              ) : (
-                <Image
-                  source={{ uri: 'https://raw.githubusercontent.com/viki28593/assets/main/premium_music_note.png' }}
-                  style={styles.artwork}
-                  resizeMode="cover"
-                />
-              )}
+              <Image
+                source={
+                  currentSong.artwork 
+                    ? { uri: currentSong.artwork } 
+                    : require('../../assets/icon.png')
+                }
+                defaultSource={require('../../assets/icon.png')}
+                style={styles.artwork}
+                resizeMode="cover"
+              />
             </View>
 
             {/* Song info */}
@@ -92,16 +96,29 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({ onPress }) => {
             </View>
 
             {/* Play/Pause button */}
-            <TouchableOpacity
-              style={[styles.playButton, { backgroundColor: colors.primary }]}
-              onPress={handlePlayPause}
-            >
-              <Ionicons
-                name={isPlaying ? 'pause' : 'play'}
-                size={20}
-                color="#FFFFFF"
-              />
-            </TouchableOpacity>
+            <View style={styles.controls}>
+              <TouchableOpacity
+                style={[styles.playButton, { backgroundColor: colors.primary }]}
+                onPress={handlePlayPause}
+              >
+                <Ionicons
+                  name={isPlaying ? 'pause' : 'play'}
+                  size={20}
+                  color="#FFFFFF"
+                />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.closeButton, { backgroundColor: 'rgba(128, 128, 128, 0.2)' }]}
+                onPress={handleClose}
+              >
+                <Ionicons
+                  name="close"
+                  size={20}
+                  color={isDark ? '#FFFFFF' : '#000000'}
+                />
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </LinearGradient>
@@ -163,7 +180,19 @@ const styles = StyleSheet.create({
   artist: {
     fontSize: FontSize.sm,
   },
+  controls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   playButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: Spacing.sm,
+  },
+  closeButton: {
     width: 36,
     height: 36,
     borderRadius: 18,

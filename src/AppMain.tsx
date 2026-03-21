@@ -7,6 +7,7 @@ import {
   PlayerScreen,
   PlaylistScreen,
   SettingsScreen,
+  DownloadScreen,
   SearchScreen,
   OnlineScreen,
 } from './screens';
@@ -17,12 +18,11 @@ import { useAudioPlayer } from './hooks';
 
 // Define navigation types
 export type RootStackParamList = {
-  MainTabs: undefined;
+  Root: undefined;
   Player: undefined;
   Playlist: { playlist: Playlist };
   Settings: undefined;
-  Search: undefined;
-  Online: undefined;
+  Downloads: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -31,6 +31,7 @@ export default function AppMain() {
   const systemColorScheme = useColorScheme();
   const navigationRef = React.useRef<NavigationContainerRef<RootStackParamList>>(null);
   const { currentSong } = useAudioPlayer();
+  const [currentRoute, setCurrentRoute] = React.useState<string | undefined>('Root');
 
   const handleMiniPlayerPress = () => {
     navigationRef.current?.navigate('Player');
@@ -40,15 +41,19 @@ export default function AppMain() {
     <View style={{ flex: 1 }}>
       <NavigationContainer
         ref={navigationRef}
+        onStateChange={() => {
+          const route = navigationRef.current?.getCurrentRoute();
+          setCurrentRoute(route?.name);
+        }}
       >
         <Stack.Navigator
-          initialRouteName="MainTabs"
+          initialRouteName="Root"
           screenOptions={{
             headerShown: false,
             animation: 'slide_from_right',
           }}
         >
-          <Stack.Screen name="MainTabs" component={TabNavigator} />
+          <Stack.Screen name="Root" component={TabNavigator} />
           <Stack.Screen 
             name="Player" 
             component={PlayerScreen}
@@ -71,10 +76,17 @@ export default function AppMain() {
               animation: 'slide_from_right',
             }}
           />
+          <Stack.Screen 
+            name="Downloads" 
+            component={DownloadScreen}
+            options={{
+              animation: 'slide_from_right',
+            }}
+          />
         </Stack.Navigator>
       </NavigationContainer>
       
-      {currentSong && (
+      {currentSong && currentRoute !== 'Player' && (
         <View style={{ position: 'absolute', bottom: 60, left: 0, right: 0 }}>
           <MiniPlayer onPress={handleMiniPlayerPress} />
         </View>

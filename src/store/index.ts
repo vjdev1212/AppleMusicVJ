@@ -22,6 +22,9 @@ interface GoogleDriveStore extends GoogleDriveState {
   setConnected: (connected: boolean, accessToken?: string, refreshToken?: string, email?: string) => void;
   setDisconnected: () => void;
   setLastScan: (date: Date) => void;
+  setScanning: (isScanning: boolean) => void;
+  setScanProgress: (progress: number) => void;
+  setScanStatus: (status: string) => void;
 }
 
 interface SettingsStore extends AppSettings {
@@ -29,8 +32,14 @@ interface SettingsStore extends AppSettings {
   setBackgroundPlayback: (enabled: boolean) => void;
   setAudioQuality: (quality: 'low' | 'medium' | 'high') => void;
   setCacheStreaming: (enabled: boolean) => void;
+  setOfflineMode: (enabled: boolean) => void;
+  setDownloadPath: (path: string) => void;
   addStreamingUrl: (url: string) => void;
   removeStreamingUrl: (url: string) => void;
+  setGoogleDriveClientId: (clientId: string) => void;
+  setYoutubeApiKey: (apiKey: string) => void;
+  setSpotifyClientId: (clientId: string) => void;
+  setSpotifyClientSecret: (secret: string) => void;
 }
 
 interface PlaylistStore {
@@ -44,6 +53,8 @@ interface PlaylistStore {
   addToRecentlyPlayed: (song: Song) => void;
   addToFavorites: (song: Song) => void;
   removeFromFavorites: (songId: string) => void;
+  addSongToPlaylist: (playlistId: string, song: Song) => void;
+  updateSongInPlaylist: (playlistId: string, songId: string, updates: Partial<Song>) => void;
 }
 
 // Player Store
@@ -141,6 +152,9 @@ export const useGoogleDriveStore = create<GoogleDriveStore>()((set) => ({
   refreshToken: null,
   email: null,
   lastScan: null,
+  isScanning: false,
+  scanProgress: 0,
+  scanStatus: '',
 
   setConnected: (connected, accessToken, refreshToken, email) => set({ 
     isConnected: connected,
@@ -158,6 +172,12 @@ export const useGoogleDriveStore = create<GoogleDriveStore>()((set) => ({
   }),
   
   setLastScan: (date) => set({ lastScan: date }),
+
+  setScanning: (isScanning) => set({ isScanning }),
+  
+  setScanProgress: (scanProgress) => set({ scanProgress }),
+  
+  setScanStatus: (scanStatus) => set({ scanStatus }),
 }));
 
 // Settings Store
@@ -166,12 +186,21 @@ export const useSettingsStore = create<SettingsStore>()((set) => ({
   backgroundPlayback: true,
   audioQuality: 'high',
   cacheStreaming: false,
+  isOfflineMode: true,
+  downloadPath: 'downloads/',
   streamingUrls: [],
+  // API Tokens - Default values
+  googleDriveClientId: '706156834841-89cufgqr5n44h81utu4b9lg1dt3jk9mh.apps.googleusercontent.com',
+  youtubeApiKey: 'AIzaSyBb6sozj32MeGUsOAE_06peS7GH16CPLi8',
+  spotifyClientId: '',
+  spotifyClientSecret: '',
 
   setTheme: (theme) => set({ theme }),
   setBackgroundPlayback: (backgroundPlayback) => set({ backgroundPlayback }),
   setAudioQuality: (audioQuality) => set({ audioQuality }),
   setCacheStreaming: (cacheStreaming) => set({ cacheStreaming }),
+  setOfflineMode: (isOfflineMode) => set({ isOfflineMode }),
+  setDownloadPath: (downloadPath) => set({ downloadPath }),
   
   addStreamingUrl: (url) => set((state) => ({
     streamingUrls: [...state.streamingUrls, url]
@@ -180,6 +209,11 @@ export const useSettingsStore = create<SettingsStore>()((set) => ({
   removeStreamingUrl: (url) => set((state) => ({
     streamingUrls: state.streamingUrls.filter((u) => u !== url)
   })),
+
+  setGoogleDriveClientId: (googleDriveClientId) => set({ googleDriveClientId }),
+  setYoutubeApiKey: (youtubeApiKey) => set({ youtubeApiKey }),
+  setSpotifyClientId: (spotifyClientId) => set({ spotifyClientId }),
+  setSpotifyClientSecret: (spotifyClientSecret) => set({ spotifyClientSecret }),
 }));
 
 // Playlist Store
@@ -217,5 +251,24 @@ export const usePlaylistStore = create<PlaylistStore>()((set) => ({
   
   removeFromFavorites: (songId) => set((state) => ({
     favorites: state.favorites.filter((s) => s.id !== songId)
+  })),
+
+  addSongToPlaylist: (playlistId, song) => set((state) => ({
+    playlists: state.playlists.map((p) => 
+      p.id === playlistId 
+        ? { ...p, songs: [...p.songs, song] } 
+        : p
+    )
+  })),
+
+  updateSongInPlaylist: (playlistId, songId, updates) => set((state) => ({
+    playlists: state.playlists.map((p) => 
+      p.id === playlistId 
+        ? { 
+            ...p, 
+            songs: p.songs.map((s) => s.id === songId ? { ...s, ...updates } : s)
+          } 
+        : p
+    )
   })),
 }));

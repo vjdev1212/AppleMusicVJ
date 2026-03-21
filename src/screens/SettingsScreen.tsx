@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -15,11 +15,14 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import * as FileSystem from 'expo-file-system/legacy';
 
 import { useTheme } from '../hooks';
 import { useSettingsStore, useGoogleDriveStore, usePlaylistStore } from '../store';
 import { googleDriveService } from '../services/googleDriveService';
+import { audioService } from '../services/audioService';
 import { Spacing, BorderRadius, FontSize } from '../constants/theme';
+import { Song } from '../types';
 
 export const SettingsScreen: React.FC = () => {
   const { colors } = useTheme();
@@ -32,25 +35,52 @@ export const SettingsScreen: React.FC = () => {
     audioQuality,
     cacheStreaming,
     streamingUrls,
+    downloadPath,
+    googleDriveClientId,
+    youtubeApiKey,
+    spotifyClientId,
+    spotifyClientSecret,
     setTheme,
     setBackgroundPlayback,
     setAudioQuality,
     setCacheStreaming,
+    setDownloadPath,
     addStreamingUrl,
     removeStreamingUrl,
+    setGoogleDriveClientId,
+    setYoutubeApiKey,
+    setSpotifyClientId,
+    setSpotifyClientSecret,
   } = useSettingsStore();
   
-  const { isConnected, email, setConnected, setDisconnected } = useGoogleDriveStore();
-  const { setPlaylists } = usePlaylistStore();
+  const { isConnected, email, isScanning, scanProgress, setConnected, setDisconnected } = useGoogleDriveStore();
+  const { setPlaylists, playlists } = usePlaylistStore();
   
   const [newUrl, setNewUrl] = useState('');
   const [connecting, setConnecting] = useState(false);
   const [scanning, setScanning] = useState(false);
   
+  // API Token State
+  const [showApiTokenModal, setShowApiTokenModal] = useState(false);
+  const [editingApiToken, setEditingApiToken] = useState<'googleDrive' | 'youtube' | 'spotify' | null>(null);
+  const [apiTokenValue, setApiTokenValue] = useState('');
+  const [apiTokenSecret, setApiTokenSecret] = useState('');
+  
   // Folder Selection State
   const [folders, setFolders] = useState<{id: string; name: string}[]>([]);
   const [showFolderModal, setShowFolderModal] = useState(false);
   const [fetchingFolders, setFetchingFolders] = useState(false);
+
+  // Download Verification State
+  const [showDownloadModal, setShowDownloadModal] = useState(false);
+  const [verifyingDownloads, setVerifyingDownloads] = useState(false);
+  const [downloadVerificationResults, setDownloadVerificationResults] = useState<{
+    playlistName: string;
+    songs: { title: string; downloaded: boolean; path?: string }[];
+    totalSongs: number;
+    downloadedCount: number;
+  }[]>([]);
+  const [totalStorageUsed, setTotalStorageUsed] = useState<string>('0 MB');
 
   // Check connection status on mount
   useEffect(() => {
@@ -167,6 +197,152 @@ export const SettingsScreen: React.FC = () => {
     );
   };
 
+  const handleClearDownloads = async () => {
+    Alert.alert(
+      'Clear Downloads',
+      'Are you sure you want to delete all offline songs?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Clear', 
+          style: 'destructive', 
+          onPress: async () => {
+            await googleDriveService.clearDownloads();
+            await audioService.clearCache();
+            Alert.alert('Success', 'Local storage and cache cleared.');
+          }
+        }
+      ]
+    );
+  };
+
+  // API Token Functions
+  const openApiTokenModal = (type: 'googleDrive' | 'youtube' | 'spotify') => {
+    setEditingApiToken(type);
+    if (type === 'googleDrive') {
+      setApiTokenValue(googleDriveClientId);
+    } else if (type === 'youtube') {
+      setApiTokenValue(youtubeApiKey);
+    } else if (type === 'spotify') {
+      setApiTokenValue(spotifyClientId);
+      setApiTokenSecret(spotifyClientSecret);
+    }
+    setShowApiTokenModal(true);
+  };
+
+  const saveApiToken = () => {
+    if (editingApiToken === 'googleDrive') {
+      setGoogleDriveClientId(apiTokenValue);
+    } else if (editingApiToken === 'youtube') {
+      setYoutubeApiKey(apiTokenValue);
+    } else if (editingApiToken === 'spotify') {
+      setSpotifyClientId(apiTokenValue);
+      setSpotifyClientSecret(apiTokenSecret);
+    }
+    setShowApiTokenModal(false);
+    setEditingApiToken(null);
+    Alert.alert('Success', 'API token saved. Restart the app for changes to take effect.');
+  };
+
+  // Download Verification Functions
+  const handleVerifyDownloads = useCallback(async () => {
+    setVerifyingDownloads(true);
+    setShowDownloadModal(true);
+    setDownloadVerificationResults([]);
+    
+    try {
+      const downloadsDir = `${FileSystem.documentDirectory}${downloadPath}`;
+      const dirInfo = await FileSystem.getInfoAsync(downloadsDir);
+      
+      if (!dirInfo.exists) {
+        setDownloadVerificationResults([{
+          playlistName: 'No Downloads',
+          songs: [],
+          totalSongs: 0,
+          downloadedCount: 0,
+        }]);
+        setVerifyingDownloads(false);
+        return;
+      }
+
+      // Read all folders in downloads directory
+      const folders = await FileSystem.readDirectoryAsync(downloadsDir);
+      const results: typeof downloadVerificationResults = [];
+      let totalSize = 0;
+
+      for (const folderName of folders) {
+        const folderUri = `${downloadsDir}${folderName}/`;
+        const folderInfo = await FileSystem.getInfoAsync(folderUri);
+        
+        if (folderInfo.isDirectory) {
+          const files = await FileSystem.readDirectoryAsync(folderUri);
+          const songs: { title: string; downloaded: boolean; path?: string }[] = [];
+          let downloadedCount = 0;
+
+          for (const fileName of files) {
+            if (fileName.endsWith('.mp3') || fileName.endsWith('.m4a')) {
+              const fileUri = `${folderUri}${fileName}`;
+              const fileInfo = await FileSystem.getInfoAsync(fileUri);
+              
+              if (fileInfo.exists && fileInfo.size) {
+                totalSize += fileInfo.size;
+                downloadedCount++;
+                songs.push({
+                  title: fileName.replace(/\.[^/.]+$/, ''),
+                  downloaded: true,
+                  path: fileUri,
+                });
+              } else {
+                songs.push({
+                  title: fileName.replace(/\.[^/.]+$/, ''),
+                  downloaded: false,
+                });
+              }
+            }
+          }
+
+          if (songs.length > 0) {
+            results.push({
+              playlistName: folderName,
+              songs,
+              totalSongs: songs.length,
+              downloadedCount,
+            });
+          }
+        }
+      }
+
+      // Calculate total storage used
+      const sizeInMB = (totalSize / (1024 * 1024)).toFixed(2);
+      setTotalStorageUsed(`${sizeInMB} MB`);
+      
+      if (results.length === 0) {
+        setDownloadVerificationResults([{
+          playlistName: 'No Audio Files Found',
+          songs: [],
+          totalSongs: 0,
+          downloadedCount: 0,
+        }]);
+      } else {
+        setDownloadVerificationResults(results);
+      }
+    } catch (error) {
+      console.warn('[Verify] Error checking downloads:', error);
+      Alert.alert('Error', 'Failed to verify downloads. Please try again.');
+    } finally {
+      setVerifyingDownloads(false);
+    }
+  }, [downloadPath]);
+
+  const formatPath = (path: string): string => {
+    // Simplify the path for display
+    const parts = path.split('/');
+    if (parts.length > 3) {
+      return '...' + parts.slice(-3).join('/');
+    }
+    return path;
+  };
+
   const renderSection = (title: string, children: React.ReactNode) => (
     <View style={styles.section}>
       <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
@@ -234,50 +410,88 @@ export const SettingsScreen: React.FC = () => {
                     </Text>
                   </View>
                 </View>
-                {renderSettingRow('Select Folder to Scan', undefined, handleFetchFolders, false)}
+                <TouchableOpacity style={styles.settingRow} onPress={handleFetchFolders}>
+                  <View style={styles.settingRowContent}>
+                    <View style={[styles.iconContainer, { backgroundColor: '#4285F4' + '20' }]}>
+                      <Ionicons name="folder" size={20} color="#4285F4" />
+                    </View>
+                    <View style={styles.settingTextContainer}>
+                      <Text style={[styles.settingLabel, { color: colors.text }]}>Select Folder to Scan</Text>
+                    </View>
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+                </TouchableOpacity>
                 {scanning && (
                   <View style={styles.scanningContainer}>
                     <ActivityIndicator size="small" color={colors.primary} />
                     <Text style={[styles.scanningText, { color: colors.textSecondary }]}>Scanning folder...</Text>
                   </View>
                 )}
-                {renderSettingRow(
-                  'Disconnect',
-                  undefined,
-                  handleGoogleDriveDisconnect,
-                  true
-                )}
+                <TouchableOpacity style={styles.settingRow} onPress={handleGoogleDriveDisconnect}>
+                  <View style={styles.settingRowContent}>
+                    <View style={[styles.iconContainer, { backgroundColor: '#FF3B30' + '20' }]}>
+                      <Ionicons name="log-out" size={20} color="#FF3B30" />
+                    </View>
+                    <View style={styles.settingTextContainer}>
+                      <Text style={[styles.settingLabel, { color: '#FF3B30' }]}>Disconnect</Text>
+                    </View>
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+                </TouchableOpacity>
               </>
             ) : (
               <>
                 <View style={styles.notConnectedContainer}>
-                  <Text style={[styles.notConnectedText, { color: colors.textSecondary }]}>
-                    Connect your Google Drive to scan for MP3 files
-                  </Text>
+                  {/* Download Progress Indicator */}
+                  {isScanning && (
+                    <View style={[styles.progressContainer, { backgroundColor: colors.surfaceSecondary }]}>
+                      <View style={styles.progressHeader}>
+                        <Ionicons name="download" size={20} color={colors.primary} />
+                        <Text style={[styles.progressTitle, { color: colors.text }]}>
+                          Downloading...
+                        </Text>
+                        <Text style={[styles.progressPercent, { color: colors.primary }]}>
+                          {Math.round(scanProgress * 100)}%
+                        </Text>
+                      </View>
+                      <View style={[styles.progressBarBg, { backgroundColor: colors.border }]}>
+                        <View 
+                          style={[
+                            styles.progressBarFill, 
+                            { backgroundColor: colors.primary, width: `${scanProgress * 100}%` }
+                          ]} 
+                        />
+                      </View>
+                      <Text style={[styles.progressSubtext, { color: colors.textSecondary }]}>
+                        {scanProgress < 1 ? 'Downloading songs to device...' : 'Finalizing...'}
+                      </Text>
+                    </View>
+                  )}
+                  {!isScanning && (
+                    <View style={styles.notConnectedContent}>
+                      <View style={[styles.notConnectedIcon, { backgroundColor: '#4285F4' + '20' }]}>
+                        <Ionicons name="cloud" size={32} color="#4285F4" />
+                      </View>
+                      <Text style={[styles.notConnectedText, { color: colors.textSecondary }]}>
+                        Connect your Google Drive to scan for MP3 files
+                      </Text>
+                    </View>
+                  )}
                 </View>
-                <TouchableOpacity
-                  style={[styles.connectButton, { backgroundColor: colors.primary }]}
-                  onPress={handleGoogleDriveConnect}
-                  disabled={connecting}
-                >
-                  <Ionicons name="logo-google" size={20} color="#FFFFFF" />
-                  <Text style={styles.connectButtonText}>
-                    {connecting ? 'Connecting...' : 'Connect Google Drive'}
-                  </Text>
-                </TouchableOpacity>
+                {!isScanning && (
+                  <TouchableOpacity
+                    style={[styles.connectButton, { backgroundColor: colors.primary }]}
+                    onPress={handleGoogleDriveConnect}
+                    disabled={connecting}
+                  >
+                    <Ionicons name="logo-google" size={20} color="#FFFFFF" />
+                    <Text style={styles.connectButtonText}>
+                      {connecting ? 'Connecting...' : 'Connect Google Drive'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
               </>
             )}
-          </>
-        )}
-
-        {/* Account Details Section */}
-        {renderSection(
-          'Account Details',
-          <>
-            <View style={styles.settingRow}>
-              <Text style={[styles.settingLabel, { color: colors.text }]}>Expo Username</Text>
-              <Text style={styles.settingValue}>viki28593</Text>
-            </View>
           </>
         )}
 
@@ -286,22 +500,21 @@ export const SettingsScreen: React.FC = () => {
           'Streaming URLs',
           <>
             <View style={styles.addUrlContainer}>
-              <TextInput
-                style={[
-                  styles.urlInput,
-                  {
-                    backgroundColor: colors.surfaceSecondary,
-                    color: colors.text,
-                    borderColor: colors.border,
-                  },
-                ]}
-                placeholder="Enter MP3 URL"
-                placeholderTextColor={colors.textTertiary}
-                value={newUrl}
-                onChangeText={setNewUrl}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
+              <View style={[styles.urlInputContainer, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
+                <Ionicons name="link" size={18} color={colors.textTertiary} style={styles.urlInputIcon} />
+                <TextInput
+                  style={[
+                    styles.urlInput,
+                    { color: colors.text },
+                  ]}
+                  placeholder="Enter MP3 URL"
+                  placeholderTextColor={colors.textTertiary}
+                  value={newUrl}
+                  onChangeText={setNewUrl}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              </View>
               <TouchableOpacity
                 style={[styles.addButton, { backgroundColor: colors.primary }]}
                 onPress={handleAddStreamUrl}
@@ -312,6 +525,7 @@ export const SettingsScreen: React.FC = () => {
             
             {streamingUrls.map((url, index) => (
               <View key={index} style={styles.urlRow}>
+                <Ionicons name="musical-note" size={16} color={colors.primary} />
                 <Text
                   style={[styles.urlText, { color: colors.text }]}
                   numberOfLines={1}
@@ -328,10 +542,73 @@ export const SettingsScreen: React.FC = () => {
             ))}
             
             {streamingUrls.length === 0 && (
-              <Text style={[styles.emptyText, { color: colors.textTertiary }]}>
-                No streaming URLs added
-              </Text>
+              <View style={styles.emptyUrlContainer}>
+                <Ionicons name="link-outline" size={32} color={colors.textTertiary} />
+                <Text style={[styles.emptyText, { color: colors.textTertiary }]}>
+                  No streaming URLs added
+                </Text>
+              </View>
             )}
+          </>
+        )}
+
+        {/* API Tokens Section */}
+        {renderSection(
+          'API Configuration',
+          <>
+            <TouchableOpacity 
+              style={styles.settingRow}
+              onPress={() => openApiTokenModal('googleDrive')}
+            >
+              <View style={styles.settingRowContent}>
+                <View style={[styles.iconContainer, { backgroundColor: '#4285F4' + '20' }]}>
+                  <Ionicons name="cloud" size={20} color="#4285F4" />
+                </View>
+                <View style={styles.settingTextContainer}>
+                  <Text style={[styles.settingLabel, { color: colors.text }]}>Google Drive</Text>
+                  <Text style={[styles.settingDescription, { color: colors.textTertiary }]} numberOfLines={1}>
+                    {googleDriveClientId ? googleDriveClientId.substring(0, 30) + '...' : 'Not configured'}
+                  </Text>
+                </View>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={[styles.settingRow, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}
+              onPress={() => openApiTokenModal('youtube')}
+            >
+              <View style={styles.settingRowContent}>
+                <View style={[styles.iconContainer, { backgroundColor: '#FF0000' + '20' }]}>
+                  <Ionicons name="logo-youtube" size={20} color="#FF0000" />
+                </View>
+                <View style={styles.settingTextContainer}>
+                  <Text style={[styles.settingLabel, { color: colors.text }]}>YouTube API</Text>
+                  <Text style={[styles.settingDescription, { color: colors.textTertiary }]} numberOfLines={1}>
+                    {youtubeApiKey ? youtubeApiKey.substring(0, 30) + '...' : 'Not configured'}
+                  </Text>
+                </View>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={[styles.settingRow, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}
+              onPress={() => openApiTokenModal('spotify')}
+            >
+              <View style={styles.settingRowContent}>
+                <View style={[styles.iconContainer, { backgroundColor: '#1DB954' + '20' }]}>
+                  <Ionicons name="musical-notes" size={20} color="#1DB954" />
+                </View>
+                <View style={styles.settingTextContainer}>
+                  <Text style={[styles.settingLabel, { color: colors.text }]}>Spotify API</Text>
+                  <Text style={[styles.settingDescription, { color: colors.textTertiary }]} numberOfLines={1}>
+                    {spotifyClientId ? spotifyClientId.substring(0, 30) + '...' : 'Not configured'}
+                  </Text>
+                </View>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+            </TouchableOpacity>
           </>
         )}
 
@@ -340,9 +617,14 @@ export const SettingsScreen: React.FC = () => {
           'Player Settings',
           <>
             <View style={styles.settingRow}>
-              <Text style={[styles.settingLabel, { color: colors.text }]}>
-                Background Playback
-              </Text>
+              <View style={styles.settingRowContent}>
+                <View style={[styles.iconContainer, { backgroundColor: '#5856D6' + '20' }]}>
+                  <Ionicons name="play-circle" size={20} color="#5856D6" />
+                </View>
+                <View style={styles.settingTextContainer}>
+                  <Text style={[styles.settingLabel, { color: colors.text }]}>Background Playback</Text>
+                </View>
+              </View>
               <Switch
                 value={backgroundPlayback}
                 onValueChange={setBackgroundPlayback}
@@ -352,9 +634,14 @@ export const SettingsScreen: React.FC = () => {
             </View>
             
             <View style={[styles.settingRow, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}>
-              <Text style={[styles.settingLabel, { color: colors.text }]}>
-                Cache Streaming Songs
-              </Text>
+              <View style={styles.settingRowContent}>
+                <View style={[styles.iconContainer, { backgroundColor: '#FF9500' + '20' }]}>
+                  <Ionicons name="cloud-download" size={20} color="#FF9500" />
+                </View>
+                <View style={styles.settingTextContainer}>
+                  <Text style={[styles.settingLabel, { color: colors.text }]}>Cache Streaming Songs</Text>
+                </View>
+              </View>
               <Switch
                 value={cacheStreaming}
                 onValueChange={setCacheStreaming}
@@ -364,16 +651,53 @@ export const SettingsScreen: React.FC = () => {
             </View>
             
             <View style={[styles.settingRow, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}>
-              <Text style={[styles.settingLabel, { color: colors.text }]}>
-                Audio Quality
-              </Text>
-              <TouchableOpacity style={styles.qualitySelector}>
-                <Text style={[styles.qualityText, { color: colors.textSecondary }]}>
-                  {audioQuality === 'low' ? 'Low' : audioQuality === 'medium' ? 'Medium' : 'High'}
-                </Text>
+              <View style={styles.settingRowContent}>
+                <View style={[styles.iconContainer, { backgroundColor: '#34C759' + '20' }]}>
+                  <Ionicons name="headset" size={20} color="#34C759" />
+                </View>
+                <View style={styles.settingTextContainer}>
+                  <Text style={[styles.settingLabel, { color: colors.text }]}>Audio Quality</Text>
+                  <Text style={[styles.settingDescription, { color: colors.textTertiary }]}>
+                    {audioQuality === 'low' ? 'Low' : audioQuality === 'medium' ? 'Medium' : 'High'}
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity 
+                style={styles.qualitySelector}
+                onPress={() => {
+                  const qualities: Array<'low' | 'medium' | 'high'> = ['low', 'medium', 'high'];
+                  const currentIndex = qualities.indexOf(audioQuality);
+                  const nextQuality = qualities[(currentIndex + 1) % qualities.length];
+                  setAudioQuality(nextQuality);
+                }}
+              >
                 <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
               </TouchableOpacity>
             </View>
+          </>
+        )}
+
+        {/* Storage & Downloads Section */}
+        {renderSection(
+          'Storage & Downloads',
+          <>
+            <TouchableOpacity 
+              style={styles.settingRow}
+              onPress={() => navigation.navigate('Downloads' as never)}
+            >
+              <View style={styles.settingRowContent}>
+                <View style={[styles.iconContainer, { backgroundColor: colors.primary + '20' }]}>
+                  <Ionicons name="folder" size={20} color={colors.primary} />
+                </View>
+                <View style={styles.settingTextContainer}>
+                  <Text style={[styles.settingLabel, { color: colors.text }]}>Downloads</Text>
+                  <Text style={[styles.settingDescription, { color: colors.textTertiary }]}>
+                    View downloaded songs and playlists
+                  </Text>
+                </View>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+            </TouchableOpacity>
           </>
         )}
 
@@ -381,16 +705,28 @@ export const SettingsScreen: React.FC = () => {
         {renderSection(
           'Appearance',
           <>
-            {renderSettingRow(
-              'Theme',
-              theme.charAt(0).toUpperCase() + theme.slice(1),
-              () => {
+            <TouchableOpacity 
+              style={styles.settingRow}
+              onPress={() => {
                 const themes: Array<'light' | 'dark' | 'system'> = ['light', 'dark', 'system'];
                 const currentIndex = themes.indexOf(theme);
                 const nextTheme = themes[(currentIndex + 1) % themes.length];
                 setTheme(nextTheme);
-              }
-            )}
+              }}
+            >
+              <View style={styles.settingRowContent}>
+                <View style={[styles.iconContainer, { backgroundColor: '#AF52DE' + '20' }]}>
+                  <Ionicons name="moon" size={20} color="#AF52DE" />
+                </View>
+                <View style={styles.settingTextContainer}>
+                  <Text style={[styles.settingLabel, { color: colors.text }]}>Theme</Text>
+                  <Text style={[styles.settingDescription, { color: colors.textTertiary }]}>
+                    {theme.charAt(0).toUpperCase() + theme.slice(1)}
+                  </Text>
+                </View>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+            </TouchableOpacity>
           </>
         )}
 
@@ -398,8 +734,28 @@ export const SettingsScreen: React.FC = () => {
         {renderSection(
           'About',
           <>
-            {renderSettingRow('Version', '1.0.0')}
-            {renderSettingRow('Built with', 'React Native & Expo')}
+            <View style={styles.settingRow}>
+              <View style={styles.settingRowContent}>
+                <View style={[styles.iconContainer, { backgroundColor: '#007AFF' + '20' }]}>
+                  <Ionicons name="information-circle" size={20} color="#007AFF" />
+                </View>
+                <View style={styles.settingTextContainer}>
+                  <Text style={[styles.settingLabel, { color: colors.text }]}>Version</Text>
+                  <Text style={[styles.settingDescription, { color: colors.textTertiary }]}>1.0.0</Text>
+                </View>
+              </View>
+            </View>
+            <View style={[styles.settingRow, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}>
+              <View style={styles.settingRowContent}>
+                <View style={[styles.iconContainer, { backgroundColor: '#34C759' + '20' }]}>
+                  <Ionicons name="code-slash" size={20} color="#34C759" />
+                </View>
+                <View style={styles.settingTextContainer}>
+                  <Text style={[styles.settingLabel, { color: colors.text }]}>Built with</Text>
+                  <Text style={[styles.settingDescription, { color: colors.textTertiary }]}>React Native & Expo</Text>
+                </View>
+              </View>
+            </View>
           </>
         )}
       </ScrollView>
@@ -451,6 +807,81 @@ export const SettingsScreen: React.FC = () => {
           </View>
         </View>
       </Modal>
+
+      {/* API Token Modal */}
+      <Modal
+        visible={showApiTokenModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowApiTokenModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: colors.background }]}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.headerTitle, { color: colors.text }]}>
+                {editingApiToken === 'googleDrive' && 'Google Drive Client ID'}
+                {editingApiToken === 'youtube' && 'YouTube API Key'}
+                {editingApiToken === 'spotify' && 'Spotify API Credentials'}
+              </Text>
+              <TouchableOpacity onPress={() => setShowApiTokenModal(false)} style={styles.modalCloseButton}>
+                <Ionicons name="close" size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+            
+            <Text style={[styles.apiTokenHelp, { color: colors.textSecondary }]}>
+              {editingApiToken === 'googleDrive' && 'Enter your Google Cloud Console Web Client ID'}
+              {editingApiToken === 'youtube' && 'Enter your YouTube Data API v3 Key'}
+              {editingApiToken === 'spotify' && 'Enter your Spotify Developer Client ID and Secret'}
+            </Text>
+            
+            <TextInput
+              style={[
+                styles.apiTokenInput,
+                {
+                  backgroundColor: colors.surfaceSecondary,
+                  color: colors.text,
+                  borderColor: colors.border,
+                },
+              ]}
+              placeholder={editingApiToken === 'spotify' ? 'Client ID' : 'API Key / Client ID'}
+              placeholderTextColor={colors.textTertiary}
+              value={apiTokenValue}
+              onChangeText={setApiTokenValue}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            
+            {editingApiToken === 'spotify' && (
+              <TextInput
+                style={[
+                  styles.apiTokenInput,
+                  {
+                    backgroundColor: colors.surfaceSecondary,
+                    color: colors.text,
+                    borderColor: colors.border,
+                    marginTop: Spacing.md,
+                  },
+                ]}
+                placeholder="Client Secret"
+                placeholderTextColor={colors.textTertiary}
+                value={apiTokenSecret}
+                onChangeText={setApiTokenSecret}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            )}
+            
+            <TouchableOpacity
+              style={[styles.saveApiTokenButton, { backgroundColor: colors.primary }]}
+              onPress={saveApiToken}
+            >
+              <Text style={styles.saveApiTokenText}>Save</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+
     </View>
   );
 };
@@ -484,7 +915,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingBottom: Spacing.xxl,
+    paddingBottom: Spacing.xxl + 80,
+  },
+  bottomSpacer: {
+    height: 80,
+    backgroundColor: '#1C1C1E',
   },
   section: {
     marginTop: Spacing.lg,
@@ -535,6 +970,52 @@ const styles = StyleSheet.create({
   notConnectedContainer: {
     padding: Spacing.md,
   },
+  notConnectedContent: {
+    alignItems: 'center',
+    paddingVertical: Spacing.lg,
+  },
+  notConnectedIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: Spacing.md,
+  },
+  progressContainer: {
+    padding: Spacing.md,
+    borderRadius: BorderRadius.md,
+    marginBottom: Spacing.md,
+  },
+  progressHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: Spacing.sm,
+  },
+  progressTitle: {
+    fontSize: FontSize.md,
+    fontWeight: '600',
+    marginLeft: Spacing.sm,
+    flex: 1,
+  },
+  progressPercent: {
+    fontSize: FontSize.md,
+    fontWeight: '700',
+  },
+  progressBarBg: {
+    height: 6,
+    borderRadius: 3,
+    overflow: 'hidden',
+    marginBottom: Spacing.sm,
+  },
+  progressBarFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  progressSubtext: {
+    fontSize: FontSize.sm,
+    textAlign: 'center',
+  },
   notConnectedText: {
     fontSize: FontSize.md,
     textAlign: 'center',
@@ -562,10 +1043,23 @@ const styles = StyleSheet.create({
   urlInput: {
     flex: 1,
     height: 44,
+    fontSize: FontSize.md,
+  },
+  urlInputContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 44,
     borderRadius: BorderRadius.sm,
     paddingHorizontal: Spacing.md,
-    fontSize: FontSize.md,
     borderWidth: 1,
+  },
+  urlInputIcon: {
+    marginRight: Spacing.sm,
+  },
+  emptyUrlContainer: {
+    alignItems: 'center',
+    paddingVertical: Spacing.lg,
   },
   addButton: {
     width: 44,
@@ -613,6 +1107,43 @@ const styles = StyleSheet.create({
     fontSize: FontSize.md,
     marginTop: Spacing.sm,
   },
+  clearButton: {
+    padding: Spacing.sm,
+  },
+  settingRowContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  iconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: Spacing.md,
+  },
+  settingTextContainer: {
+    flex: 1,
+  },
+  settingDescription: {
+    fontSize: FontSize.sm,
+    marginTop: 2,
+  },
+  pathContainer: {
+    flex: 1,
+  },
+  pathHelp: {
+    fontSize: FontSize.xs,
+    marginTop: 4,
+  },
+  pathInput: {
+    fontSize: FontSize.sm,
+    marginTop: 8,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 6,
+    borderRadius: BorderRadius.sm,
+  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -636,11 +1167,6 @@ const styles = StyleSheet.create({
   modalCloseButton: {
     padding: Spacing.sm,
   },
-  modalLoading: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
   folderItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -651,5 +1177,177 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: Spacing.md,
     fontSize: FontSize.md,
+  },
+  verifyContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  verifyInfo: {
+    flex: 1,
+    marginRight: Spacing.md,
+  },
+  verifyHelp: {
+    fontSize: FontSize.xs,
+    marginTop: 4,
+  },
+  verifyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.sm,
+    gap: 6,
+  },
+  verifyButtonText: {
+    color: '#FFFFFF',
+    fontSize: FontSize.sm,
+    fontWeight: '600',
+  },
+  modalLoading: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  verifyLoadingText: {
+    fontSize: FontSize.md,
+    marginTop: Spacing.md,
+  },
+  apiTokenHelp: {
+    fontSize: FontSize.sm,
+    marginBottom: Spacing.md,
+  },
+  apiTokenInput: {
+    height: 48,
+    borderRadius: BorderRadius.sm,
+    paddingHorizontal: Spacing.md,
+    fontSize: FontSize.md,
+    marginBottom: Spacing.md,
+  },
+  saveApiTokenButton: {
+    height: 48,
+    borderRadius: BorderRadius.sm,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: Spacing.sm,
+  },
+  saveApiTokenText: {
+    color: '#FFFFFF',
+    fontSize: FontSize.md,
+    fontWeight: '600',
+  },
+  storageText: {
+    fontSize: FontSize.sm,
+    marginTop: 4,
+  },
+  downloadResultCard: {
+    marginHorizontal: Spacing.md,
+    marginVertical: Spacing.sm,
+    padding: Spacing.md,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+  },
+  downloadResultHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  downloadResultInfo: {
+    flex: 1,
+  },
+  downloadResultTitle: {
+    fontSize: FontSize.md,
+    fontWeight: '600',
+  },
+  downloadResultCount: {
+    fontSize: FontSize.sm,
+    marginTop: 2,
+  },
+  downloadStatusBadge: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
+    borderRadius: BorderRadius.sm,
+  },
+  downloadStatusText: {
+    color: '#FFFFFF',
+    fontSize: FontSize.xs,
+    fontWeight: '600',
+  },
+  songPreviewList: {
+    marginTop: Spacing.md,
+    paddingTop: Spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(128, 128, 128, 0.2)',
+  },
+  songPreviewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 4,
+    gap: 8,
+  },
+  songPreviewTitle: {
+    flex: 1,
+    fontSize: FontSize.sm,
+  },
+  moreSongsText: {
+    fontSize: FontSize.sm,
+    marginTop: Spacing.xs,
+    fontStyle: 'italic',
+  },
+  emptyVerifyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: Spacing.xxl * 2,
+  },
+  emptyVerifyText: {
+    fontSize: FontSize.lg,
+    fontWeight: '600',
+    marginTop: Spacing.md,
+  },
+  emptyVerifySubtext: {
+    fontSize: FontSize.sm,
+    textAlign: 'center',
+    marginTop: Spacing.sm,
+    paddingHorizontal: Spacing.lg,
+  },
+  downloadPathContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: Spacing.md,
+    borderRadius: BorderRadius.sm,
+    marginBottom: Spacing.md,
+    gap: Spacing.sm,
+  },
+  downloadPathText: {
+    fontSize: FontSize.sm,
+    flex: 1,
+  },
+  activeDownloadContainer: {
+    padding: Spacing.md,
+    borderRadius: BorderRadius.md,
+    marginBottom: Spacing.md,
+    borderWidth: 1,
+  },
+  activeDownloadHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: Spacing.sm,
+  },
+  activeDownloadTitle: {
+    fontSize: FontSize.md,
+    fontWeight: '600',
+    marginLeft: Spacing.sm,
+    flex: 1,
+  },
+  activeDownloadPercent: {
+    fontSize: FontSize.md,
+    fontWeight: '700',
+  },
+  activeDownloadSubtext: {
+    fontSize: FontSize.sm,
+    textAlign: 'center',
+    marginTop: Spacing.xs,
   },
 });

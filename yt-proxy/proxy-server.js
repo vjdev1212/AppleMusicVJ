@@ -1,14 +1,4 @@
-// proxy-server.js
-// Deploy this on Render.com (free tier) or Railway.
-//
-// Setup:
-//   npm init -y
-//   npm install express yt-dlp-exec cors
-//   node proxy-server.js
-//
-// On Render: set Start Command to "node proxy-server.js"
-// yt-dlp binary is auto-downloaded by yt-dlp-exec on first run.
-
+// proxy-server.js - Improved version
 const express = require('express');
 const ytDlp = require('yt-dlp-exec');
 const cors = require('cors');
@@ -23,18 +13,34 @@ app.get('/audio/:videoId', async (req, res) => {
   }
 
   try {
+    // Get direct audio URL with best quality
     const result = await ytDlp(`https://www.youtube.com/watch?v=${videoId}`, {
+      noWarnings: true,
+      noCallHome: true,
+      format: 'bestaudio[ext=m4a]/bestaudio/best',
+      getUrl: true,  // This gets direct URL instead of JSON
+    });
+
+    // ytDlp with getUrl returns direct URL string
+    if (result && typeof result === 'string' && result.startsWith('http')) {
+      return res.json({ url: result, title: videoId });
+    }
+
+    // Fallback: try JSON mode
+    const jsonResult = await ytDlp(`https://www.youtube.com/watch?v=${videoId}`, {
       dumpSingleJson: true,
       noWarnings: true,
       noCallHome: true,
-      preferFreeFormats: true,
       format: 'bestaudio[ext=m4a]/bestaudio/best',
     });
 
-    const url = result.url || result.formats?.find((f) => f.acodec !== 'none')?.url;
-    if (!url) return res.status(404).json({ error: 'No audio stream found' });
+    // Try to find direct audio URL in formats
+    const audioFormat = jsonResult.formats?.find((f) => f.audioCodec && f.url);
+    if (audioFormat?.url) {
+      return res.json({ url: audioFormat.url, title: jsonResult.title });
+    }
 
-    res.json({ url, title: result.title, duration: result.duration });
+    return res.status(404).json({ error: 'No audio stream found' });
   } catch (err) {
     console.error('yt-dlp error:', err.message);
     res.status(500).json({ error: err.message });
@@ -45,14 +51,3 @@ app.get('/health', (_, res) => res.json({ status: 'ok' }));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Proxy running on port ${PORT}`));
-
-// Add to proxy-server.js — self-ping every 14 minutes to prevent Render sleep
-const https = require('https');
-const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
-if (RENDER_URL) {
-  setInterval(() => {
-    https.get(`${RENDER_URL}/health`, (r) => {
-      console.log('Self-ping:', r.statusCode);
-    }).on('error', (e) => console.warn('Self-ping failed:', e.message));
-  }, 14 * 60 * 1000); // every 14 minutes
-}

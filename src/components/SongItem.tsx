@@ -53,19 +53,16 @@ export const SongItem: React.FC<SongItemProps> = ({
           { backgroundColor: colors.surfaceSecondary },
         ]}
       >
-        {song.artwork ? (
-          <Image
-            source={{ uri: song.artwork }}
-            style={styles.artwork}
-            resizeMode="cover"
-          />
-        ) : (
-          <Image
-            source={{ uri: 'https://raw.githubusercontent.com/viki28593/assets/main/premium_music_note.png' }}
-            style={styles.artwork}
-            resizeMode="cover"
-          />
-        )}
+        <Image
+          source={
+            song.artwork 
+              ? { uri: song.artwork } 
+              : require('../../assets/icon.png')
+          }
+          defaultSource={require('../../assets/icon.png')}
+          style={styles.artwork}
+          resizeMode="cover"
+        />
         {isPlaying && (
           <View style={styles.playingIndicator}>
             <Ionicons name="volume-high" size={16} color={colors.primary} />

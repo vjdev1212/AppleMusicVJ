@@ -8,8 +8,9 @@ export interface Song {
   duration: number;
   artwork?: string;
   url: string;
-  source: 'google-drive' | 'streaming-url' | 'youtube';
+  source: 'google-drive' | 'streaming-url' | 'youtube' | 'offline';
   fileId?: string; // Google Drive file ID
+  localUri?: string; // Local file system URI
 }
 
 export interface Playlist {
@@ -18,8 +19,9 @@ export interface Playlist {
   description?: string;
   artwork?: string;
   songs: Song[];
-  source: 'google-drive' | 'streaming' | 'favorites' | 'recently-played';
+  source: 'google-drive' | 'streaming' | 'favorites' | 'recently-played' | 'offline';
   folderId?: string; // Google Drive folder ID
+  isOffline?: boolean;
 }
 
 export interface PlayerState {
@@ -40,6 +42,9 @@ export interface GoogleDriveState {
   refreshToken: string | null;
   email: string | null;
   lastScan: Date | null;
+  isScanning: boolean;
+  scanProgress: number; // 0 to 1
+  scanStatus: string; // Detailed status message
 }
 
 export interface AppSettings {
@@ -47,7 +52,14 @@ export interface AppSettings {
   backgroundPlayback: boolean;
   audioQuality: 'low' | 'medium' | 'high';
   cacheStreaming: boolean;
+  isOfflineMode: boolean;
+  downloadPath: string;
   streamingUrls: string[];
+  // API Tokens
+  googleDriveClientId: string;
+  youtubeApiKey: string;
+  spotifyClientId: string;
+  spotifyClientSecret: string;
 }
 
 export interface RootState {

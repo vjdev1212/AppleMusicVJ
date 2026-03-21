@@ -7,28 +7,34 @@ import { Spacing, FontSize } from '../constants/theme';
 interface SectionHeaderProps {
   title: string;
   onSeeAll?: () => void;
+  rightElement?: React.ReactNode;
 }
 
 export const SectionHeader: React.FC<SectionHeaderProps> = ({
   title,
   onSeeAll,
+  rightElement,
 }) => {
   const { colors } = useTheme();
 
   return (
     <View style={styles.container}>
       <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
-      {onSeeAll && (
-        <TouchableOpacity onPress={onSeeAll} style={styles.seeAll}>
-          <Text style={[styles.seeAllText, { color: colors.primary }]}>
-            See All
-          </Text>
-          <Ionicons
-            name="chevron-forward"
-            size={14}
-            color={colors.primary}
-          />
-        </TouchableOpacity>
+      {rightElement ? (
+        rightElement
+      ) : (
+        onSeeAll && (
+          <TouchableOpacity onPress={onSeeAll} style={styles.seeAll}>
+            <Text style={[styles.seeAllText, { color: colors.primary }]}>
+              See All
+            </Text>
+            <Ionicons
+              name="chevron-forward"
+              size={14}
+              color={colors.primary}
+            />
+          </TouchableOpacity>
+        )
       )}
     </View>
   );

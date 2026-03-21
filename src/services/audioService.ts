@@ -1,9 +1,12 @@
 import { createAudioPlayer, setAudioModeAsync, AudioPlayer, AudioStatus } from 'expo-audio';
 import { AppState, AppStateStatus } from 'react-native';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Song } from '../types';
 import { googleDriveService } from './googleDriveService';
 import { youtubeService } from './youtubeService';
-import { usePlayerStore } from '../store';
+import { usePlayerStore, useSettingsStore } from '../store';
+
+const CACHE_DIR = `${FileSystem.cacheDirectory}music-cache/`;
 
 class AudioService {
   private player: AudioPlayer | null = null;
@@ -21,6 +24,12 @@ class AudioService {
 
       // Keep track of app state because lock screen sometimes needs refreshing
       this.appStateSubscription = AppState.addEventListener('change', this.handleAppStateChange);
+
+      // Ensure cache directory exists
+      const dirInfo = await FileSystem.getInfoAsync(CACHE_DIR);
+      if (!dirInfo.exists) {
+        await FileSystem.makeDirectoryAsync(CACHE_DIR, { intermediates: true });
+      }
     } catch (error) {
       console.error('Failed to initialize audio:', error);
     }
@@ -49,7 +58,8 @@ class AudioService {
       
       // Resolve YouTube URL if missing
       if (song.source === 'youtube' && !songUrl) {
-        const resolvedUrl = await youtubeService.getAudioUrl(song.id);
+        const { audioQuality } = useSettingsStore.getState();
+        const resolvedUrl = await youtubeService.getAudioUrl(song.id, audioQuality);
         if (!resolvedUrl) {
           throw new Error('Could not resolve YouTube audio URL');
         }
@@ -69,17 +79,55 @@ class AudioService {
 
       let source: any = { uri: songUrl };
       
-      if (song.source === 'google-drive') {
-        const token = await googleDriveService.getAccessToken();
-        if (!token) {
-           throw new Error('Google Drive access token missing. Please sign in again.');
-        }
+      // Set headers for playback to avoid 403/Forbidden from YouTube/CDNs
+      if (song.source === 'youtube') {
         source = {
           uri: songUrl,
           headers: {
-            Authorization: `Bearer ${token}`
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
           }
         };
+      } else if (song.source === 'google-drive') {
+        // 1. Check PERMANENT local storage (from Sync)
+        let localPath: string | null = null;
+        if (song.localUri) {
+          try {
+            const info = await FileSystem.getInfoAsync(song.localUri);
+            if (info.exists) {
+              localPath = song.localUri;
+            }
+          } catch (e) {
+            console.warn('[Audio] Failed to verify localUri:', e);
+          }
+        }
+
+        // 2. Check JIT CACHE if not in permanent storage
+        if (!localPath) {
+          const cached = await this.getCachedUri(song.id);
+          if (cached) {
+            localPath = cached;
+            console.log('[Audio] Playing from JIT cache:', song.title);
+          }
+        }
+
+        if (localPath) {
+          source = { uri: localPath };
+        } else {
+          // 3. ONLY if not local, then check token and stream
+          const token = await googleDriveService.getAccessToken();
+          if (!token) {
+            throw new Error('Google Drive access token missing and song not available offline. Please sign in.');
+          }
+
+          console.log('[Audio] Streaming from Drive:', song.title);
+          source = {
+            uri: songUrl,
+            headers: { Authorization: `Bearer ${token}` }
+          };
+          
+          // Trigger background cache
+          this.cacheInBackground(song, token).catch(e => console.warn('[Cache] Background task failed:', e));
+        }
       }
 
       // Create new expo-audio player
@@ -192,8 +240,51 @@ class AudioService {
     return false;
   }
 
+  private async getCachedUri(songId: string): Promise<string | null> {
+    const fileUri = `${CACHE_DIR}${songId}.mp3`;
+    const info = await FileSystem.getInfoAsync(fileUri);
+    return info.exists ? fileUri : null;
+  }
+
+  private async cacheInBackground(song: Song, token: string): Promise<void> {
+    // Only cache Google Drive songs for now
+    if (song.source !== 'google-drive') return;
+    
+    // Check if user enabled caching in settings
+    const { cacheStreaming } = useSettingsStore.getState();
+    if (!cacheStreaming) return;
+
+    try {
+      const dest = `${CACHE_DIR}${song.id}.mp3`;
+      // Check again if it was downloaded while we were deciding
+      const info = await FileSystem.getInfoAsync(dest);
+      if (info.exists) return;
+
+      console.log(`[Cache] Caching started for: ${song.title}`);
+      await FileSystem.downloadAsync(song.url, dest, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      console.log(`[Cache] ✓ Cached: ${song.title}`);
+    } catch (e) {
+      console.warn(`[Cache] Failed for ${song.title}:`, e);
+    }
+  }
+
   getCurrentSong(): Song | null {
     return this.currentSong;
+  }
+
+  async clearCache(): Promise<void> {
+    try {
+      const info = await FileSystem.getInfoAsync(CACHE_DIR);
+      if (info.exists) {
+        await FileSystem.deleteAsync(CACHE_DIR);
+        await FileSystem.makeDirectoryAsync(CACHE_DIR, { intermediates: true });
+      }
+      console.log('[Cache] Cache cleared');
+    } catch (e) {
+      console.warn('[Cache] Failed to clear cache:', e);
+    }
   }
 
   async unload(): Promise<void> {

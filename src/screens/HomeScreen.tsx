@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View,
   ScrollView,
@@ -8,9 +8,13 @@ import {
   FlatList,
   TouchableOpacity,
   RefreshControl,
+  Image,
+  ImageBackground,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -23,13 +27,23 @@ import { googleDriveService } from '../services/googleDriveService';
 import { Playlist, Song } from '../types';
 
 type RootStackParamList = {
-  Home: undefined;
+  Root: undefined;
   Player: undefined;
   Playlist: { playlist: Playlist };
   Settings: undefined;
 };
 
-type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'Home'>;
+type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'Root'>;
+
+// Interface for offline download tracking
+interface OfflineDownloadInfo {
+  playlistId: string;
+  playlistName: string;
+  songId: string;
+  songTitle: string;
+  status: 'pending' | 'downloading' | 'completed' | 'error';
+  progress: number;
+}
 
 export const HomeScreen: React.FC = () => {
   const { colors, isDark } = useTheme();
@@ -39,8 +53,8 @@ export const HomeScreen: React.FC = () => {
   const { loadPlaylist, currentSong, isPlaying } = useAudioPlayer();
   
   const { playlists, recentlyPlayed, setPlaylists, favorites } = usePlaylistStore();
-  const { streamingUrls } = useSettingsStore();
-  const { isConnected: isGoogleDriveConnected, setConnected, lastScan, setLastScan } = useGoogleDriveStore();
+  const { streamingUrls, downloadPath } = useSettingsStore();
+  const { isConnected: isGoogleDriveConnected, setConnected, lastScan, setLastScan, isScanning, scanProgress, scanStatus, setScanStatus } = useGoogleDriveStore();
   
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -61,15 +75,20 @@ export const HomeScreen: React.FC = () => {
     source: 'streaming',
   };
 
-  // Google Drive playlists
+  // Google Drive playlists (only online - exclude local/offline playlists)
   const googleDrivePlaylists = playlists.filter(p => p.source === 'google-drive');
   
-  // All playlists for display
+  // Online playlists only - exclude offline/local playlists from Home screen
+  const onlinePlaylistsOnly = googleDrivePlaylists;
+  
+  // All playlists for display (online only - no offline playlists)
   const allPlaylists = [
-    ...googleDrivePlaylists,
+    ...onlinePlaylistsOnly,
     ...(streamingUrls.length > 0 ? [streamingPlaylist] : []),
     ...playlists.filter(p => p.source === 'favorites'),
   ];
+
+
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -91,7 +110,8 @@ export const HomeScreen: React.FC = () => {
       }
     } else {
       setConnected(false);
-      setPlaylists(playlists.filter(p => p.source !== 'google-drive'));
+      // Don't load local playlists in HomeScreen - only show online content
+      setPlaylists([]);
     }
     
     setRefreshing(false);
@@ -117,6 +137,7 @@ export const HomeScreen: React.FC = () => {
         }
       } else {
         setConnected(false);
+        // Don't auto-load local playlists in HomeScreen - only show online content
         setPlaylists([]);
       }
     };
@@ -161,30 +182,88 @@ export const HomeScreen: React.FC = () => {
         horizontal
         data={allPlaylists}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <PlaylistCard
-            playlist={item}
+        renderItem={({ item, index }) => (
+          <TouchableOpacity
+            style={[styles.largePlaylistCard, { backgroundColor: getPlaylistColor(index) }]}
             onPress={() => handlePlaylistPress(item)}
-          />
+            activeOpacity={0.8}
+          >
+            <ImageBackground
+              source={{ uri: item.artwork || getPlaylistArtwork(item.name) }}
+              style={styles.largePlaylistImage}
+              imageStyle={styles.largePlaylistImageInner}
+            >
+              <LinearGradient
+                colors={['transparent', 'rgba(0,0,0,0.7)', 'rgba(0,0,0,0.95)']}
+                style={styles.largePlaylistGradient}
+              >
+                <View style={styles.largePlaylistTop}>
+                  <View style={styles.largePlaylistBadge}>
+                    <Ionicons name="musical-notes" size={10} color="#fff" />
+                    <Text style={styles.largePlaylistBadgeText}>{item.songs.length}</Text>
+                  </View>
+                </View>
+                <View style={styles.largePlaylistInfo}>
+                  <Text style={styles.largePlaylistName} numberOfLines={2}>
+                    {item.name}
+                  </Text>
+                  <Text style={styles.largePlaylistCount}>
+                    {item.songs.length} songs
+                  </Text>
+                  <View style={styles.largePlayButton}>
+                    <Ionicons name="play" size={20} color="#000" />
+                  </View>
+                </View>
+              </LinearGradient>
+            </ImageBackground>
+          </TouchableOpacity>
         )}
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.playlistList}
+        contentContainerStyle={styles.largePlaylistList}
       />
     );
+  };
+
+  // Generate consistent colors for playlist cards
+  const getPlaylistColor = (index: number): string => {
+    const colors = [
+      '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', 
+      '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F',
+      '#BB8FCE', '#85C1E9', '#F8B500', '#00CED1'
+    ];
+    return colors[index % colors.length];
+  };
+
+  // Get artwork based on playlist name
+  const getPlaylistArtwork = (name: string): string => {
+    const artworks: { [key: string]: string } = {
+      'favorites': 'https://i.pinimg.com/736x/01/d1/b4/01d1b4547ce03c3ec499c827caac4a72.jpg',
+      'recently played': 'https://i.pinimg.com/736x/8b/94/2f/8b942f5ba6bc1bfd2f113125a570d6d3.jpg',
+      'default': 'https://i.pinimg.com/736x/01/d1/b4/01d1b4547ce03c3ec499c827caac4a72.jpg'
+    };
+    const key = Object.keys(artworks).find(k => name.toLowerCase().includes(k));
+    return key ? artworks[key] : artworks['default'];
   };
 
   const renderRecentlyPlayed = () => {
     if (recentlyPlayed.length === 0) return null;
 
+    const displaySongs = recentlyPlayed.slice(0, 5);
+    
+    if (displaySongs.length === 0) return null;
+
     return (
       <>
-        <SectionHeader title="Recently Played" />
+        <SectionHeader title='Recently Played' />
         <View style={styles.recentlyPlayed}>
-          {recentlyPlayed.slice(0, 5).map((song, index) => (
+          {displaySongs.map((song, index) => (
             <SongItem
               key={song.id}
               song={song}
-              onPress={() => handleRecentlyPlayedPress(song, index)}
+              onPress={() => {
+                loadPlaylist(recentlyPlayed, index);
+                navigation.navigate('Player');
+              }}
               isPlaying={currentSong?.id === song.id}
             />
           ))}
@@ -203,9 +282,14 @@ export const HomeScreen: React.FC = () => {
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + Spacing.sm }]}>
         <Text style={[styles.headerTitle, { color: colors.text }]}>Library</Text>
-        <TouchableOpacity onPress={handleSettingsPress} style={styles.settingsButton}>
-          <Ionicons name="settings-outline" size={24} color={colors.text} />
-        </TouchableOpacity>
+        <View style={styles.headerRight}>
+          <TouchableOpacity style={styles.profileButton}>
+            <Image 
+              source={{ uri: 'https://i.pravatar.cc/100?u=viki' }} 
+              style={styles.profileImage}
+            />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView
@@ -222,26 +306,67 @@ export const HomeScreen: React.FC = () => {
           />
         }
       >
-        {/* Apple Music-style header gradient */}
-        <LinearGradient
-          colors={isDark ? PlayerColors.dark.gradient as [string, string, string] : PlayerColors.light.gradient as [string, string, string]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.headerGradient}
-        >
-          <Text style={styles.greeting}>Good {getGreeting()}</Text>
-          <Text style={styles.headerSubtitle}>
-            {lastScan ? `Last synced ${lastScan.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Your Music'}
-          </Text>
-        </LinearGradient>
+        {/* Apple Music-style Greeting Card */}
+        <View style={styles.greetingCardContainer}>
+          <LinearGradient
+            colors={isDark ? ['#1e1e1e', '#000000'] : ['#f0f0f0', '#ffffff']}
+            style={styles.greetingCard}
+          >
+            <View style={styles.greetingContent}>
+              <View style={styles.greetingTextSection}>
+                <Text style={[styles.greetingLabel, { color: colors.primary }]}>{getGreeting().toUpperCase()}</Text>
+                <Text style={[styles.greetingTitle, { color: colors.text }]}>Welcome back, Viki</Text>
+                <Text style={[styles.greetingSubtitle, { color: colors.textSecondary }]}>
+                  {lastScan ? `Last synced ${lastScan?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Ready for some music?'}
+                </Text>
+                {/* Sync Progress Bar - Below Last Synced Text */}
+                {isScanning && (
+                  <View style={styles.progressBarWrapper}>
+                    <View style={styles.progressBarContainer}>
+                      <View style={[styles.progressBackground, { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }]}>
+                        <View 
+                          style={[
+                            styles.progressBar, 
+                            { 
+                              width: `${scanProgress * 100}%`, 
+                              backgroundColor: colors.primary 
+                            }
+                          ]} 
+                        />
+                      </View>
+                      <Text style={[styles.progressText, { color: colors.textSecondary }]}>
+                        {scanStatus || `Syncing: ${Math.round(scanProgress * 100)}%`}
+                      </Text>
+                    </View>
+                  </View>
+                )}
+              </View>
+              <View style={[styles.greetingIconCircle, { backgroundColor: colors.primary + '15' }]}>
+                <Ionicons 
+                  name={getGreeting() === 'Morning' ? 'sunny' : getGreeting() === 'Afternoon' ? 'partly-sunny' : 'moon'} 
+                  size={32} 
+                  color={colors.primary} 
+                />
+              </View>
+            </View>
+          </LinearGradient>
+        </View>
 
         {/* Playlists Section */}
         <SectionHeader
-          title={isGoogleDriveConnected ? 'Playlists' : 'Your Playlists'}
+          title={isGoogleDriveConnected ? 'Playlists' : 'Playlists'}
+          rightElement={
+            <View style={styles.statusBadge}>
+              <View style={[styles.statusDot, { backgroundColor: isGoogleDriveConnected ? '#34C759' : '#FF3B30' }]} />
+              <Text style={[styles.statusText, { color: colors.textSecondary }]}>
+                {isGoogleDriveConnected ? 'Online' : 'No Drive'}
+              </Text>
+            </View>
+          }
         />
         {renderPlaylistSection()}
 
-        {/* Recently Played */}
+        {/* Recently Played / Offline Songs */}
         {renderRecentlyPlayed()}
 
         {/* Favorites Section */}
@@ -265,12 +390,6 @@ export const HomeScreen: React.FC = () => {
         )}
       </ScrollView>
 
-      {/* Mini Player */}
-      {currentSong && (
-        <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
-          <MiniPlayer onPress={handleMiniPlayerPress} />
-        </View>
-      )}
     </View>
   );
 };
@@ -290,15 +409,49 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: Spacing.md,
-    paddingBottom: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    paddingBottom: Spacing.sm,
   },
   headerTitle: {
-    fontSize: FontSize.xxxl,
-    fontWeight: 'bold',
+    fontSize: FontSize.xxxl || 34,
+    fontWeight: '700',
+    letterSpacing: -0.5,
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginBottom: 4,
+  },
+  offlineToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: BorderRadius.round,
+    gap: 6,
+    marginRight: 4,
+  },
+  offlineToggleText: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  offlineLoadingIndicator: {
+    marginLeft: 2,
   },
   settingsButton: {
-    padding: Spacing.sm,
+    padding: Spacing.xs,
+  },
+  profileButton: {
+    marginLeft: Spacing.xs,
+  },
+  profileImage: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(128, 128, 128, 0.2)',
   },
   scrollView: {
     flex: 1,
@@ -306,24 +459,124 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingBottom: 100,
   },
-  headerGradient: {
-    marginHorizontal: Spacing.md,
+  greetingCardContainer: {
+    paddingHorizontal: Spacing.md,
     marginBottom: Spacing.lg,
-    padding: Spacing.lg,
-    borderRadius: BorderRadius.lg,
   },
-  greeting: {
-    fontSize: FontSize.xxl,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginBottom: Spacing.xs,
+  greetingCard: {
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.xl,
+    borderWidth: 1,
+    borderColor: 'rgba(128, 128, 128, 0.1)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.1,
+    shadowRadius: 15,
+    elevation: 5,
   },
-  headerSubtitle: {
-    fontSize: FontSize.lg,
-    color: 'rgba(255, 255, 255, 0.8)',
+  greetingContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  greetingTextSection: {
+    flex: 1,
+  },
+  greetingLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+    marginBottom: 4,
+  },
+  greetingTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  greetingSubtitle: {
+    fontSize: FontSize.sm,
+    opacity: 0.8,
+  },
+  greetingIconCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   playlistList: {
     paddingHorizontal: Spacing.md,
+  },
+  largePlaylistList: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+  },
+  largePlaylistCard: {
+    width: 160,
+    height: 200,
+    marginRight: Spacing.md,
+    borderRadius: BorderRadius.lg,
+    overflow: 'hidden',
+  },
+  largePlaylistImage: {
+    width: '100%',
+    height: '100%',
+  },
+  largePlaylistImageInner: {
+    borderRadius: BorderRadius.lg,
+  },
+  largePlaylistGradient: {
+    flex: 1,
+    justifyContent: 'space-between',
+    padding: Spacing.md,
+  },
+  largePlaylistTop: {
+    alignItems: 'flex-end',
+  },
+  largePlaylistBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 4,
+  },
+  largePlaylistBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  largePlaylistInfo: {
+    marginTop: 'auto',
+  },
+  largePlaylistName: {
+    color: '#FFFFFF',
+    fontSize: FontSize.md,
+    fontWeight: '700',
+    textShadowColor: 'rgba(0,0,0,0.5)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  largePlaylistCount: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: FontSize.sm,
+    marginTop: 4,
+  },
+  largePlayButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: Spacing.md,
+    alignSelf: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
   },
   recentlyPlayed: {
     marginBottom: Spacing.md,
@@ -343,5 +596,47 @@ const styles = StyleSheet.create({
     fontSize: FontSize.md,
     textAlign: 'center',
     marginTop: Spacing.sm,
+  },
+  progressBarWrapper: {
+    marginTop: Spacing.sm,
+  },
+  progressBarContainer: {
+    padding: Spacing.sm,
+  },
+  progressBackground: {
+    height: 5,
+    borderRadius: 2.5,
+    width: '100%',
+    overflow: 'hidden',
+  },
+  progressBar: {
+    height: '100%',
+    borderRadius: 2.5,
+  },
+  progressText: {
+    fontSize: 10,
+    textAlign: 'center',
+    marginTop: 6,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(128,128,128,0.1)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginRight: 6,
+  },
+  statusText: {
+    fontSize: 10,
+    fontWeight: '600',
+    textTransform: 'uppercase',
   },
 });

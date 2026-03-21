@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../hooks';
 import { Spacing, BorderRadius, FontSize } from '../constants/theme';
 import { Playlist } from '../types';
@@ -28,6 +29,8 @@ export const PlaylistCard: React.FC<PlaylistCardProps> = ({
     medium: 150,
     large: 180,
   };
+
+  const isOffline = playlist.isOffline;
 
   const getSourceIcon = () => {
     switch (playlist.source) {
@@ -66,18 +69,29 @@ export const PlaylistCard: React.FC<PlaylistCardProps> = ({
           },
         ]}
       >
-        {playlist.artwork ? (
-          <Image
-            source={{ uri: playlist.artwork }}
-            style={[styles.image, { width: imageSize[size], height: imageSize[size] }]}
-            resizeMode="cover"
-          />
-        ) : (
-          <Image
-            source={{ uri: 'https://raw.githubusercontent.com/viki28593/assets/main/premium_music_note.png' }}
-            style={[styles.image, { width: imageSize[size], height: imageSize[size] }]}
-            resizeMode="cover"
-          />
+        <Image
+          source={
+            playlist.artwork 
+              ? { uri: playlist.artwork } 
+              : require('../../assets/icon.png')
+          }
+          defaultSource={require('../../assets/icon.png')}
+          style={[styles.image, { width: imageSize[size], height: imageSize[size] }]}
+          resizeMode="cover"
+        />
+        {/* Download Icon */}
+        <TouchableOpacity 
+          style={styles.downloadButton}
+          onPress={() => {
+            // Handle download press - could navigate to download screen or start download
+          }}
+        >
+          <Ionicons name="download-outline" size={20} color="#fff" />
+        </TouchableOpacity>
+        {isOffline && (
+          <View style={styles.offlineBadge}>
+            <Text style={styles.offlineBadgeText}>OFFLINE</Text>
+          </View>
         )}
       </View>
       <Text
@@ -122,5 +136,31 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: FontSize.sm,
+  },
+  offlineBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  offlineBadgeText: {
+    color: '#ffffff',
+    fontSize: 8,
+    fontWeight: '800',
+  },
+  downloadButton: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    padding: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
 });

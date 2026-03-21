@@ -28,11 +28,18 @@ export const OnlineScreen: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [results, setResults] = useState<YouTubeSearchResult[]>([]);
   const [loading, setLoading] = useState(false);
+  
+  // Lazy loading progress for audio URL fetching
+  const [loadProgress, setLoadProgress] = useState(0);
+  const [totalToLoad, setTotalToLoad] = useState(0);
+  const [isLoadingAudio, setIsLoadingAudio] = useState(false);
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
     
     setLoading(true);
+    setLoadProgress(0);
+    setTotalToLoad(0);
     Keyboard.dismiss();
     
     try {
@@ -45,29 +52,55 @@ export const OnlineScreen: React.FC = () => {
     }
   };
 
+  // Play selected song with lazy loading for queue
   const playSong = async (selectedItem: YouTubeSearchResult) => {
+    const startIndex = results.findIndex(r => r.id === selectedItem.id);
+    
+    // Show loading state
+    setIsLoadingAudio(true);
+    setLoadProgress(0);
+    setTotalToLoad(results.length);
+    
     try {
-      setLoading(true);
+      // Get audio URL for selected song first
       const audioUrl = await youtubeService.getAudioUrl(selectedItem.id);
+      setLoadProgress(1);
       
       if (audioUrl) {
-        const queue: any[] = results.map(item => ({
+        // Create queue with only the selected song URL initially
+        const queue: any[] = results.map((item, index) => ({
           id: item.id,
           title: item.title,
           artist: item.channelTitle,
-          url: item.id === selectedItem.id ? audioUrl : '', // Only the current one has the URL for now
+          url: item.id === selectedItem.id ? audioUrl : '',
           artwork: item.thumbnail,
           source: 'youtube',
           duration: 0,
         }));
 
-        const startIndex = results.findIndex(r => r.id === selectedItem.id);
-        loadPlaylist(queue, startIndex);
+        // Load playlist and start playing
+        await loadPlaylist(queue, startIndex);
+        
+        // Preload remaining songs in background
+        for (let i = 0; i < results.length; i++) {
+          if (i !== startIndex && !queue[i].url) {
+            try {
+              const url = await youtubeService.getAudioUrl(results[i].id);
+              if (url) {
+                queue[i].url = url;
+              }
+            } catch (e) {
+              // Ignore errors for preloading
+            }
+            setLoadProgress(i + 1);
+          }
+        }
       }
     } catch (error) {
       console.error('Playback error:', error);
     } finally {
-      setLoading(false);
+      setIsLoadingAudio(false);
+      setLoadProgress(0);
     }
   };
 
@@ -106,7 +139,7 @@ export const OnlineScreen: React.FC = () => {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header with Search Box */}
       <View style={[styles.header, { paddingTop: insets.top + Spacing.sm }]}>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Online</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>YouTube</Text>
         
         <View style={styles.searchContainer}>
           <BlurView 

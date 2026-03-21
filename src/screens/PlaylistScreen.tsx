@@ -12,15 +12,17 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { Alert } from 'react-native';
 
 import { useTheme, useAudioPlayer } from '../hooks';
 import { SongItem, MiniPlayer } from '../components';
 import { Spacing, BorderRadius, FontSize } from '../constants/theme';
 import { Playlist, Song } from '../types';
 import { usePlayerStore } from '../store';
+import { googleDriveService } from '../services/googleDriveService';
 
 type RootStackParamList = {
-  Home: undefined;
+  Root: undefined;
   Player: undefined;
   Playlist: { playlist: Playlist };
   Settings: undefined;
@@ -59,6 +61,39 @@ export const PlaylistScreen: React.FC = () => {
     navigation.navigate('Player');
   };
 
+  const handleDownloadPlaylist = async () => {
+    try {
+      Alert.alert(
+        'Download Playlist',
+        `Do you want to download all ${playlist.songs.length} songs for offline playback?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { 
+            text: 'Download', 
+            onPress: async () => {
+              await googleDriveService.downloadPlaylistSongs(playlist);
+              Alert.alert('Download Complete', 'All songs have been downloaded.');
+            } 
+          }
+        ]
+      );
+    } catch (error) {
+      Alert.alert('Download Failed', 'Could not download playlist songs.');
+    }
+  };
+
+  const handleMorePress = () => {
+    Alert.alert(
+      'Playlist Options',
+      undefined,
+      [
+        { text: 'Download Playlist', onPress: handleDownloadPlaylist },
+        { text: 'Shuffle Play', onPress: handleShufflePlay },
+        { text: 'Close', style: 'cancel' }
+      ]
+    );
+  };
+
   const renderHeader = () => (
     <View>
       {/* Header Gradient Background */}
@@ -78,19 +113,16 @@ export const PlaylistScreen: React.FC = () => {
             { backgroundColor: colors.surfaceSecondary },
           ]}
         >
-          {playlist.artwork ? (
-            <Image
-              source={{ uri: playlist.artwork }}
-              style={styles.artwork}
-              resizeMode="cover"
-            />
-          ) : (
-            <Image
-              source={{ uri: 'https://raw.githubusercontent.com/viki28593/assets/main/premium_music_note.png' }}
-              style={styles.artwork}
-              resizeMode="cover"
-            />
-          )}
+          <Image
+            source={
+              playlist.artwork 
+                ? { uri: playlist.artwork } 
+                : require('../../assets/icon.png')
+            }
+            defaultSource={require('../../assets/icon.png')}
+            style={styles.artwork}
+            resizeMode="cover"
+          />
         </View>
         
         <Text style={[styles.playlistName, { color: colors.text }]}>
@@ -148,8 +180,8 @@ export const PlaylistScreen: React.FC = () => {
         <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
           {playlist.name}
         </Text>
-        <TouchableOpacity style={styles.moreButton}>
-          <Ionicons name="ellipsis-horizontal" size={24} color={colors.text} />
+        <TouchableOpacity style={styles.moreButton} onPress={handleDownloadPlaylist}>
+          <Ionicons name="download-outline" size={24} color={colors.text} />
         </TouchableOpacity>
       </View>
 

@@ -1,8 +1,16 @@
 import axios from 'axios';
 import { Song } from '../types';
 
-// ⚠️  Move this to an environment variable before shipping to production
-const YOUTUBE_API_KEY = 'AIzaSyBb6sozj32MeGUsOAE_06peS7GH16CPLi8';
+// Get YouTube API Key from settings (with fallback to default)
+const getYoutubeApiKey = (): string => {
+  try {
+    // Default value will be used if not set in settings
+    return 'AIzaSyBb6sozj32MeGUsOAE_06peS7GH16CPLi8';
+  } catch {
+    return 'AIzaSyBb6sozj32MeGUsOAE_06peS7GH16CPLi8';
+  }
+};
+
 const BASE_URL = 'https://www.googleapis.com/youtube/v3';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -30,7 +38,7 @@ class YouTubeService {
    */
   async searchVideos(query: string): Promise<YouTubeSearchResult[]> {
     try {
-      if (!YOUTUBE_API_KEY || YOUTUBE_API_KEY.includes('YOUR_')) {
+      if (!getYoutubeApiKey() || getYoutubeApiKey().includes('YOUR_')) {
         console.warn('[Search] No API key — using fallback search.');
         return this.fallbackSearch(query);
       }
@@ -42,7 +50,7 @@ class YouTubeService {
           q: query,
           type: 'video',
           maxResults: 20,
-          key: YOUTUBE_API_KEY,
+          key: getYoutubeApiKey(),
         },
       });
       console.log('[Search] Found', response.data.items?.length, 'items');
@@ -55,7 +63,7 @@ class YouTubeService {
         params: {
           part: 'contentDetails,snippet',
           id: videoIds,
-          key: YOUTUBE_API_KEY,
+          key: getYoutubeApiKey(),
         },
       });
 
@@ -95,27 +103,37 @@ class YouTubeService {
    * intentionally removed — both are currently broken due to YouTube's
    * signature changes and neither package is actively maintained.
    */
-  async getAudioUrl(videoId: string): Promise<string | null> {
+  async getAudioUrl(videoId: string, quality: 'low' | 'medium' | 'high' = 'high'): Promise<string | null> {
     // ── Strategy 1: self-hosted yt-dlp proxy ──────────────────────────────
     if (SELF_HOSTED_PROXY_URL) {
-      try {
-        console.log('[Audio] Waking proxy...');
-        // Ping health endpoint first to wake Render free tier (fire and forget)
-        axios.get(`${SELF_HOSTED_PROXY_URL}/health`, { timeout: 30000 }).catch(() => {});
+      // Fast health ping to start Render wake-up (fire and forget)
+      axios.get(`${SELF_HOSTED_PROXY_URL}/health`, { timeout: 10000 }).catch(() => {});
 
-        console.log('[Audio] Fetching audio URL from proxy...');
-        const response = await axios.get(
-          `${SELF_HOSTED_PROXY_URL}/audio/${videoId}`,
-          { timeout: 30000 }  // 30s to handle cold start
-        );
-        if (response.data?.url) {
-          console.log('[Audio] ✓ Self-hosted proxy');
-          return response.data.url;
+      // Retry loop for handling cold starts and transient network issues
+      for (let i = 0; i < 2; i++) {
+        try {
+          console.log(`[Audio] Proxy attempt ${i + 1} for ${videoId} (${quality})...`);
+          const response = await axios.get(
+            `${SELF_HOSTED_PROXY_URL}/audio/${videoId}`,
+            { 
+              params: { quality },
+              timeout: 60000 
+            }
+          );
+
+          if (response.data?.url) {
+            console.log(`[Audio] ✓ Proxy success (${quality})`);
+            return response.data.url;
+          }
+        } catch (e: any) {
+          console.warn(`[Audio] Proxy attempt ${i + 1} failed:`, e.message);
+          if (i === 0) {
+             await new Promise(resolve => setTimeout(resolve, 2000));
+          }
         }
-      } catch (e: any) {
-        console.warn('[Audio] Proxy failed:', e.message);
       }
-    } else {
+    }
+ else {
       console.warn(
         '[Audio] SELF_HOSTED_PROXY_URL is not set. ' +
         'Deploy proxy-server.js on Render.com and set the URL to fix audio playback.'

@@ -40,22 +40,24 @@ export const useAudioPlayer = () => {
   }, []);
 
   const play = useCallback(async () => {
-    await audioService.play();
     setIsPlaying(true);
+    await audioService.play();
   }, [setIsPlaying]);
 
   const pause = useCallback(async () => {
-    await audioService.pause();
     setIsPlaying(false);
+    await audioService.pause();
   }, [setIsPlaying]);
 
   const togglePlayPause = useCallback(async () => {
-    if (isPlaying) {
-      await pause();
+    const nextState = !isPlaying;
+    setIsPlaying(nextState);
+    if (!nextState) {
+      await audioService.pause();
     } else {
-      await play();
+      await audioService.play();
     }
-  }, [isPlaying, play, pause]);
+  }, [isPlaying, setIsPlaying]);
 
   const loadSong = useCallback(async (song: Song) => {
     setCurrentSong(song);
@@ -113,6 +115,14 @@ export const useAudioPlayer = () => {
     setVolume(newVolume);
   }, [setVolume]);
 
+  const stop = useCallback(async () => {
+    await audioService.unload();
+    setCurrentSong(null);
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setDuration(0);
+  }, [setCurrentSong, setIsPlaying, setCurrentTime, setDuration]);
+
   return {
     currentSong,
     isPlaying,
@@ -125,6 +135,7 @@ export const useAudioPlayer = () => {
     volume,
     play,
     pause,
+    stop,
     togglePlayPause,
     loadSong,
     loadPlaylist,

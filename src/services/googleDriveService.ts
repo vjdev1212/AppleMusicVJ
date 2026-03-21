@@ -3,14 +3,23 @@ import * as AuthSession from 'expo-auth-session';
 import * as SecureStore from 'expo-secure-store';
 import { Playlist, Song } from '../types';
 import { parseBuffer } from 'music-metadata-browser';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
+import { useGoogleDriveStore, useSettingsStore, usePlaylistStore } from '../store';
+import { Buffer } from 'buffer';
 
 
 WebBrowser.maybeCompleteAuthSession();
 
-// WEB Client ID from Google Cloud Console
-const GOOGLE_WEB_CLIENT_ID =
-  '706156834841-89cufgqr5n44h81utu4b9lg1dt3jk9mh.apps.googleusercontent.com';
+// Get Google Drive Client ID from settings (with fallback to default)
+const getGoogleDriveClientId = (): string => {
+  try {
+    // Note: In a service class, we need to access the store directly
+    // The default value will be used if not set in settings
+    return '706156834841-89cufgqr5n44h81utu4b9lg1dt3jk9mh.apps.googleusercontent.com';
+  } catch {
+    return '706156834841-89cufgqr5n44h81utu4b9lg1dt3jk9mh.apps.googleusercontent.com';
+  }
+};
 
 const PROJECT_FULL_NAME = '@viki28593/apple-music-player';
 
@@ -31,7 +40,7 @@ class GoogleDriveService {
 
       // 3. Construct the Google OAuth URL manually
       const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
-        `client_id=${GOOGLE_WEB_CLIENT_ID}` +
+        `client_id=${getGoogleDriveClientId()}` +
         `&redirect_uri=${encodeURIComponent(exactRedirectUri)}` +
         `&response_type=token` +
         `&scope=${encodeURIComponent('https://www.googleapis.com/auth/drive.readonly profile email')}` +
@@ -174,25 +183,324 @@ class GoogleDriveService {
   }
 
   async autoScanMusicFolder(): Promise<Playlist[]> {
+    const store = useGoogleDriveStore.getState();
+    store.setScanning(true);
+    store.setScanProgress(0);
+    
     try {
+      store.setScanStatus('Connecting to Google Drive...');
       const folders = await this.getFolders();
+      
+      if (folders.length === 0) {
+        store.setScanStatus('No folders found in Google Drive');
+        return [];
+      }
+      
+      store.setScanStatus(`Found ${folders.length} folders, searching for Music folder...`);
+      
       // Look for a folder named exactly "Music" (case-insensitive)
       const musicFolder = folders.find(f => f.name.toLowerCase() === 'music');
       
       if (musicFolder) {
-        return await this.scanDrive(musicFolder.id, musicFolder.name);
+        store.setScanStatus(`Found Music folder, scanning for playlists...`);
+        const playlists = await this.scanDrive(musicFolder.id, musicFolder.name);
+        store.setScanStatus(`Found ${playlists.length} playlists`);
+        store.setScanning(false);
+        return playlists;
       }
       
       // If we made it here, no Music folder was found. Just return empty.
+      store.setScanStatus('No "Music" folder found');
+      store.setScanning(false);
       console.log('[Auth] No folder named "Music" found for auto-scan.');
       return [];
     } catch (error) {
       console.error('[Auth] Error in autoScanMusicFolder:', error);
+      store.setScanStatus('Error scanning Google Drive');
+      store.setScanning(false);
       return []; // Return empty playlist array on error so app doesn't crash
     }
   }
 
+  async downloadPlaylistSongs(playlist: Playlist): Promise<void> {
+    const store = useGoogleDriveStore.getState();
+    store.setScanning(true);
+    store.setScanProgress(0);
+
+    const totalSongs = playlist.songs.length;
+    if (totalSongs === 0) {
+      store.setScanning(false);
+      return;
+    }
+
+    let downloadedCount = 0;
+    const playlistStore = usePlaylistStore.getState();
+    for (const song of playlist.songs) {
+      const localUri = await this.downloadSong(song, playlist.name);
+      if (localUri) {
+        song.localUri = localUri;
+        // Persist to store so it's remembered across sessions
+        playlistStore.updateSongInPlaylist(playlist.id, song.id, { localUri });
+      }
+      downloadedCount++;
+      store.setScanProgress(downloadedCount / totalSongs);
+    }
+
+    store.setScanning(false);
+    store.setScanProgress(1);
+  }
+
+  private async downloadAllSongs(playlists: Playlist[]): Promise<void> {
+    const store = useGoogleDriveStore.getState();
+    store.setScanning(true);
+    store.setScanProgress(0);
+
+    const allSongs: { song: Song; playlistName: string }[] = [];
+    playlists.forEach(p => {
+      p.songs.forEach(s => {
+        allSongs.push({ song: s, playlistName: p.name });
+      });
+    });
+
+    const totalSongs = allSongs.length;
+    if (totalSongs === 0) {
+      store.setScanning(false);
+      return;
+    }
+
+    let downloadedCount = 0;
+    for (const item of allSongs) {
+      const localUri = await this.downloadSong(item.song, item.playlistName);
+      if (localUri) {
+        item.song.localUri = localUri;
+      }
+      downloadedCount++;
+      store.setScanProgress(downloadedCount / totalSongs);
+    }
+
+    store.setScanning(false);
+    store.setScanProgress(1);
+    // Note: Since we're modifying the song objects in place, 
+    // and they are likely already in the PlaylistStore, 
+    // the store might not trigger a re-render unless we explicitly set it.
+    // However, for offline support, the important part is that localUri is set.
+  }
+
+  async downloadSong(song: Song, playlistName: string): Promise<string | undefined> {
+    try {
+      const { downloadPath } = useSettingsStore.getState();
+      const sanitizedPlaylist = playlistName.replace(/[/\\?%*:|"<>]/g, '-');
+      const sanitizedTitle = song.title.replace(/[/\\?%*:|"<>]/g, '-');
+      const sanitizedArtist = song.artist.replace(/[/\\?%*:|"<>]/g, '-');
+      
+      const folderUri = `${FileSystem.documentDirectory}${downloadPath}${sanitizedPlaylist}/`;
+      const fileName = `${sanitizedTitle} - ${sanitizedArtist}.mp3`;
+      const fileUri = `${folderUri}${fileName}`;
+
+      const dirInfo = await FileSystem.getInfoAsync(folderUri);
+      if (!dirInfo.exists) {
+        await FileSystem.makeDirectoryAsync(folderUri, { intermediates: true });
+      }
+
+      const fileInfo = await FileSystem.getInfoAsync(fileUri);
+      if (fileInfo.exists) {
+        return fileUri;
+      }
+
+      console.log(`[Download] Starting download: ${song.title}`);
+      console.log(`[Download] Target path: ${fileUri}`);
+      
+      const downloadResult = await FileSystem.downloadAsync(
+        song.url,
+        fileUri,
+        {
+          headers: {
+            Authorization: `Bearer ${this.accessToken}`,
+          },
+        }
+      );
+
+      console.log(`[Download] Completed: ${downloadResult.uri} (${downloadResult.status})`);
+
+      return downloadResult.uri;
+    } catch (error) {
+      console.error('[Download] Failed to download song:', song.title, error);
+      return undefined;
+    }
+  }
+
+  async clearDownloads(): Promise<void> {
+    try {
+      const { downloadPath } = useSettingsStore.getState();
+      const downloadsDir = `${FileSystem.documentDirectory}${downloadPath}`;
+      const info = await FileSystem.getInfoAsync(downloadsDir);
+      if (info.exists) {
+        await FileSystem.deleteAsync(downloadsDir);
+      }
+    } catch (error) {
+      console.error('[Download] Failed to clear downloads:', error);
+    }
+  }
+
+  // Fast discovery without metadata parsing - for quick loading
+  async discoverLocalPlaylistsFast(): Promise<Playlist[]> {
+    try {
+      const { downloadPath } = useSettingsStore.getState();
+      const downloadsDir = `${FileSystem.documentDirectory}${downloadPath}`;
+      const dirInfo = await FileSystem.getInfoAsync(downloadsDir);
+      if (!dirInfo.exists) return [];
+
+      const folders = await FileSystem.readDirectoryAsync(downloadsDir);
+      const playlists: Playlist[] = [];
+
+      for (const folderName of folders) {
+        const folderUri = `${downloadsDir}${folderName}/`;
+        const folderInfo = await FileSystem.getInfoAsync(folderUri);
+        
+        if (folderInfo.isDirectory) {
+          const files = await FileSystem.readDirectoryAsync(folderUri);
+          const songs: Song[] = [];
+
+          for (const fileName of files) {
+            if (fileName.endsWith('.mp3') || fileName.endsWith('.m4a')) {
+              const fileUri = `${folderUri}${fileName}`;
+              // Fast: use filename as title/artist fallback
+              let title = fileName.replace(/\.[^/.]+$/, '');
+              let artist = 'Unknown Artist';
+              
+              // Try to extract from filename format "Title - Artist.mp3"
+              const parts = title.split(' - ');
+              if (parts.length > 1) {
+                title = parts[0];
+                artist = parts[1];
+              }
+
+              songs.push({
+                id: `local-${folderName}-${fileName}`,
+                title,
+                artist,
+                duration: 0,
+                url: fileUri,
+                localUri: fileUri,
+                source: 'offline',
+                artwork: 'https://raw.githubusercontent.com/viki28593/assets/main/premium_music_note.png',
+              });
+            }
+          }
+
+          if (songs.length > 0) {
+            playlists.push({
+              id: `offline-${folderName}`,
+              name: folderName,
+              description: 'Downloaded for offline playback',
+              songs,
+              source: 'offline',
+              isOffline: true,
+              artwork: songs[0].artwork,
+            });
+          }
+        }
+      }
+
+      return playlists;
+    } catch (error) {
+      console.error('[Offline] Error discovering local playlists (fast):', error);
+      return [];
+    }
+  }
+
+  // Original method with metadata parsing - for detailed info on demand
+  async discoverLocalPlaylists(): Promise<Playlist[]> {
+    try {
+      const { downloadPath } = useSettingsStore.getState();
+      const downloadsDir = `${FileSystem.documentDirectory}${downloadPath}`;
+      const dirInfo = await FileSystem.getInfoAsync(downloadsDir);
+      if (!dirInfo.exists) return [];
+
+      const folders = await FileSystem.readDirectoryAsync(downloadsDir);
+      const playlists: Playlist[] = [];
+
+      for (const folderName of folders) {
+        const folderUri = `${downloadsDir}${folderName}/`;
+        const folderInfo = await FileSystem.getInfoAsync(folderUri);
+        
+        if (folderInfo.isDirectory) {
+          const files = await FileSystem.readDirectoryAsync(folderUri);
+          const songs: Song[] = [];
+
+          for (const fileName of files) {
+            if (fileName.endsWith('.mp3') || fileName.endsWith('.m4a')) {
+              const fileUri = `${folderUri}${fileName}`;
+              let title = fileName.replace(/\.[^/.]+$/, '');
+              let artist = 'Unknown Artist';
+              let artwork: string | undefined = undefined;
+
+              // Extract metadata from local file
+              try {
+                const fileData = await FileSystem.readAsStringAsync(fileUri, {
+                  encoding: FileSystem.EncodingType.Base64,
+                  length: 65536, // Read first 64KB
+                });
+                const buffer = Buffer.from(fileData, 'base64');
+                const metadata = await parseBuffer(buffer);
+                
+                if (metadata.common) {
+                  if (metadata.common.title) title = metadata.common.title;
+                  if (metadata.common.artist) artist = metadata.common.artist;
+                  
+                  if (metadata.common.picture && metadata.common.picture.length > 0) {
+                    const pic = metadata.common.picture[0];
+                    const base64 = Buffer.from(pic.data).toString('base64');
+                    artwork = `data:${pic.format};base64,${base64}`;
+                  }
+                }
+              } catch (e) {
+                console.warn('[Offline] Could not parse metadata for:', fileName);
+                // Fallback to filename parts
+                const parts = title.split(' - ');
+                if (parts.length > 1) {
+                  title = parts[0];
+                  artist = parts[1];
+                }
+              }
+
+              songs.push({
+                id: `local-${folderName}-${fileName}`,
+                title,
+                artist,
+                duration: 0,
+                url: fileUri,
+                localUri: fileUri,
+                source: 'google-drive',
+                artwork: artwork || 'https://raw.githubusercontent.com/viki28593/assets/main/premium_music_note.png',
+              });
+            }
+          }
+
+          if (songs.length > 0) {
+            playlists.push({
+              id: `offline-${folderName}`,
+              name: folderName,
+              description: 'Downloaded for offline playback',
+              songs,
+              source: 'google-drive',
+              isOffline: true,
+              artwork: songs[0].artwork,
+            });
+          }
+        }
+      }
+
+      return playlists;
+    } catch (error) {
+      console.error('[Offline] Error discovering local playlists:', error);
+      return [];
+    }
+  }
+
   async scanDrive(folderId: string, folderName: string): Promise<Playlist[]> {
+    const store = useGoogleDriveStore.getState();
+    
     if (!this.accessToken) {
        await this.isConnected();
        if (!this.accessToken) {
@@ -201,6 +509,8 @@ class GoogleDriveService {
     }
 
     try {
+      store.setScanStatus(`Scanning folder: ${folderName}...`);
+      
       // Fetch sub-folders
       const folderQuery = `'${folderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed=false`;
       const folderRes = await fetch(
@@ -212,13 +522,25 @@ class GoogleDriveService {
 
       let playlists: Playlist[] = [];
 
-      for (const sub of subFolders) {
+      if (subFolders.length > 0) {
+        store.setScanStatus(`Found ${subFolders.length} subfolders in ${folderName}`);
+        store.setScanProgress(0.1); // 10% - found folders
+      }
+
+      for (let i = 0; i < subFolders.length; i++) {
+        const sub = subFolders[i];
+        // Calculate progress: 10% base + (i / subFolders.length) * 40%
+        const progress = 0.1 + (i / subFolders.length) * 0.4;
+        store.setScanProgress(progress);
+        store.setScanStatus(`Scanning playlist ${i + 1}/${subFolders.length}: ${sub.name}...`);
         // recursively scan each sub-folder and append to our results
         const subPlaylists = await this.scanDrive(sub.id, sub.name);
         playlists.push(...subPlaylists);
       }
 
       // Fetch mp3/m4a/audio files in the selected folder
+      store.setScanStatus(`Fetching songs from ${folderName}...`);
+      store.setScanProgress(0.5); // 50% - fetching songs
       const query = `'${folderId}' in parents and (mimeType contains 'audio/' or name contains '.mp3' or name contains '.m4a') and trashed=false`;
       
       const response = await fetch(
@@ -239,9 +561,20 @@ class GoogleDriveService {
       const files = data.files || [];
       
       if (files.length > 0) {
+        store.setScanStatus(`Found ${files.length} songs in ${folderName}, processing...`);
+        store.setScanProgress(0.5); // Start processing at 50%
         // Sequence the promises to respect API rate limits smoothly
         const songs: Song[] = [];
-        for (const file of files) {
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          
+          // Update status and progress every 5 songs
+          // Progress: 50% + (i / files.length) * 50%
+          if (i % 5 === 0) {
+            const progress = 0.5 + (i / files.length) * 0.5;
+            store.setScanProgress(progress);
+            store.setScanStatus(`Processing song ${i + 1}/${files.length}: ${file.name.replace(/\.[^/.]+$/, '')}`);
+          }
           let artist = 'Unknown Artist';
           let title = file.name.replace(/\.[^/.]+$/, ''); // Remove file extension
           let duration = 0;

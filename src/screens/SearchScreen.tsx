@@ -23,7 +23,7 @@ import { Spacing, BorderRadius, FontSize } from '../constants/theme';
 import { Playlist, Song } from '../types';
 
 type RootStackParamList = {
-  Home: undefined;
+  Root: undefined;
   Search: undefined;
   Online: undefined;
   Player: undefined;
@@ -88,9 +88,9 @@ export const SearchScreen: React.FC = () => {
   };
 
   const handleSongMorePress = (song: Song) => {
-    const localPlaylists = playlists.filter(p => p.source === 'local');
-    if (localPlaylists.length === 0) {
-      Alert.alert('No Local Playlists', 'Please create a local playlist first.');
+    const offlinePlaylists = playlists.filter(p => p.isOffline);
+    if (offlinePlaylists.length === 0) {
+      Alert.alert('No Playlists', 'You don\'t have any offline playlists to add to.');
       return;
     }
 
@@ -100,7 +100,7 @@ export const SearchScreen: React.FC = () => {
       'Add to Playlist',
       'Select a playlist to add this song to:',
       [
-        ...localPlaylists.map(pl => ({
+        ...offlinePlaylists.map((pl: Playlist) => ({
           text: pl.name,
           onPress: () => {
             addSongToPlaylist(pl.id, song);
