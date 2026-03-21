@@ -55,15 +55,18 @@ app.get('/search', async (req, res) => {
       limit: parseInt(limit)
     });
 
-    const videos = (data.items || []).map((video) => ({
-      id: video.id,
-      title: video.title,
-      thumbnail: video.thumbnail || `https://img.youtube.com/vi/${video.id}/mqdefault.jpg`,
-      duration: video.duration || 0,
-      channel: video.uploaderName || video.channel,
-      views: video.views,
-      uploaded: video.uploadedDate,
-    }));
+    const videos = (data.items || []).map((video) => {
+      const videoId = video.url ? (video.url.includes('v=') ? video.url.split('v=')[1] : video.url.split('/').pop()) : video.id;
+      return {
+        id: videoId,
+        title: video.title,
+        thumbnail: video.thumbnail || `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`,
+        duration: video.duration || 0,
+        channel: video.uploaderName || video.channel || video.uploaderUrl?.split('/').pop(),
+        views: video.views,
+        uploaded: video.uploadedDate,
+      };
+    });
 
     console.log(`[Search] Found ${videos.length} videos`);
     res.json({ videos });
