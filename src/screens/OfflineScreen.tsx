@@ -14,12 +14,15 @@ import {
   LayoutAnimation,
   Platform,
   UIManager,
+  ImageBackground,
+  StatusBar,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { BlurView } from 'expo-blur';
 
 import { useTheme, useAudioPlayer } from '../hooks';
 import { usePlaylistStore } from '../store';
@@ -32,30 +35,299 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const PLAYLIST_CARD_WIDTH = SCREEN_WIDTH * 0.42;
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 type RootStackParamList = {
   Root: undefined;
   Player: undefined;
   Playlist: { playlist: Playlist };
+  Settings: undefined;
 };
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'Root'>;
 
+// ─── Animated Card Component ─────────────────────────────────────────────────
+const AnimatedPlaylistCard: React.FC<{
+  item: Playlist;
+  index: number;
+  isSelected: boolean;
+  colors: any;
+  onPress: () => void;
+  DEFAULT_PLAYLIST_IMAGE: string;
+  getPlaylistColor: (name: string) => string[];
+  getFallbackImage: (name: string) => string;
+}> = ({ item, index, isSelected, colors, onPress, DEFAULT_PLAYLIST_IMAGE, getPlaylistColor, getFallbackImage }) => {
+  const scaleAnim = useRef(new Animated.Value(0)).current;
+  const pressAnim = useRef(new Animated.Value(1)).current;
+  const glowAnim = useRef(new Animated.Value(0)).current;
+  const shimmerAnim = useRef(new Animated.Value(-1)).current;
+  const [imageError, setImageError] = useState(false);
+  const [fallbackError, setFallbackError] = useState(false);
+
+  useEffect(() => {
+    Animated.spring(scaleAnim, {
+      toValue: 1,
+      delay: index * 80,
+      tension: 60,
+      friction: 8,
+      useNativeDriver: true,
+    }).start();
+  }, []);
+
+  useEffect(() => {
+    if (isSelected) {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(glowAnim, { toValue: 1, duration: 1200, useNativeDriver: false }),
+          Animated.timing(glowAnim, { toValue: 0.4, duration: 1200, useNativeDriver: false }),
+        ])
+      ).start();
+
+      Animated.loop(
+        Animated.timing(shimmerAnim, {
+          toValue: 2,
+          duration: 1800,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        })
+      ).start();
+    } else {
+      glowAnim.setValue(0);
+      shimmerAnim.setValue(-1);
+    }
+  }, [isSelected]);
+
+  const handlePressIn = () => {
+    Animated.spring(pressAnim, { toValue: 0.93, useNativeDriver: true, tension: 200 }).start();
+  };
+  const handlePressOut = () => {
+    Animated.spring(pressAnim, { toValue: 1, useNativeDriver: true, tension: 200 }).start();
+  };
+
+  const gradientColors = getPlaylistColor(item.name);
+  const shimmerTranslate = shimmerAnim.interpolate({
+    inputRange: [-1, 2],
+    outputRange: [-SCREEN_WIDTH * 0.5, SCREEN_WIDTH * 0.5],
+  });
+
+  return (
+    <Animated.View
+      style={[
+        styles.cardWrapper,
+        {
+          opacity: scaleAnim,
+          transform: [
+            { scale: Animated.multiply(scaleAnim, pressAnim) },
+            {
+              translateY: scaleAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [40, 0],
+              }),
+            },
+          ],
+        },
+      ]}
+    >
+      <TouchableOpacity
+        activeOpacity={1}
+        onPress={onPress}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+      >
+        {/* Glow border when selected */}
+        {isSelected && (
+          <Animated.View
+            style={[
+              styles.glowBorder,
+              {
+                borderColor: colors.primary,
+                opacity: glowAnim,
+                shadowColor: colors.primary,
+              },
+            ]}
+          />
+        )}
+
+        <View
+          style={[
+            styles.playlistCard,
+            {
+              backgroundColor: colors.surface,
+              borderColor: isSelected ? colors.primary + '60' : 'transparent',
+              borderWidth: isSelected ? 1.5 : 0,
+            },
+          ]}
+        >
+          {/* Artwork */}
+          <View style={styles.artworkFrame}>
+            {/* Main artwork → music icon fallback → gradient placeholder */}
+            {!imageError ? (
+              <Image
+                source={{ uri: item.artwork || DEFAULT_PLAYLIST_IMAGE }}
+                style={styles.artworkImage}
+                resizeMode="cover"
+                onError={() => setImageError(true)}
+              />
+            ) : !fallbackError ? (
+              /* Music-themed PNG fallback */
+              <LinearGradient
+                colors={getPlaylistColor(item.name) as [string, string]}
+                style={styles.artworkImage}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+              >
+                <Image
+                  source={{ uri: getFallbackImage(item.name) }}
+                  style={styles.fallbackIcon}
+                  resizeMode="contain"
+                  onError={() => setFallbackError(true)}
+                />
+              </LinearGradient>
+            ) : (
+              /* Final gradient + note icon fallback */
+              <LinearGradient
+                colors={getPlaylistColor(item.name) as [string, string]}
+                style={[styles.artworkImage, styles.gradientFallback]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+              >
+                <View style={styles.noteFallbackContainer}>
+                  <Text style={styles.noteFallbackEmoji}>🎵</Text>
+                  <Text style={styles.noteFallbackName} numberOfLines={2}>
+                    {item.name}
+                  </Text>
+                </View>
+              </LinearGradient>
+            )}
+
+            {/* Gradient overlay on artwork */}
+            <LinearGradient
+              colors={['transparent', 'rgba(0,0,0,0.65)']}
+              style={StyleSheet.absoluteFillObject}
+            />
+
+            {/* Shimmer effect when selected */}
+            {isSelected && (
+              <Animated.View
+                style={[
+                  StyleSheet.absoluteFillObject,
+                  {
+                    transform: [
+                      { translateX: shimmerTranslate },
+                      { rotate: '-15deg' },
+                    ],
+                    backgroundColor: 'rgba(255,255,255,0.08)',
+                    width: '50%',
+                  },
+                ]}
+              />
+            )}
+
+            {/* Play / Check badge */}
+            <View
+              style={[
+                styles.playBadge,
+                {
+                  backgroundColor: isSelected ? colors.primary : 'rgba(0,0,0,0.55)',
+                  borderColor: isSelected ? colors.primary : 'rgba(255,255,255,0.2)',
+                },
+              ]}
+            >
+              <Ionicons
+                name={isSelected ? 'checkmark' : 'play'}
+                size={16}
+                color="#FFF"
+                style={isSelected ? undefined : { marginLeft: 2 }}
+              />
+            </View>
+
+            {/* Song count pill */}
+            <View style={styles.countPill}>
+              <Ionicons name="musical-note" size={9} color="rgba(255,255,255,0.85)" />
+              <Text style={styles.countPillText}>{item.songs.length}</Text>
+            </View>
+          </View>
+
+          {/* Text info */}
+          <View style={styles.cardInfo}>
+            <Text style={[styles.cardName, { color: colors.text }]} numberOfLines={1}>
+              {item.name}
+            </Text>
+            <View style={styles.cardMeta}>
+              <View style={[styles.offlineDot, { backgroundColor: '#34C759' }]} />
+              <Text style={[styles.cardMetaText, { color: colors.textSecondary }]}>
+                {item.songs.length} songs
+              </Text>
+            </View>
+          </View>
+
+          {/* Bottom accent line when selected */}
+          {isSelected && (
+            <View style={[styles.selectedAccentLine, { backgroundColor: colors.primary }]} />
+          )}
+        </View>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+};
+
+// ─── Floating Particle Component ─────────────────────────────────────────────
+const FloatingParticle: React.FC<{ color: string; delay: number }> = ({ color, delay }) => {
+  const posY = useRef(new Animated.Value(SCREEN_HEIGHT * 0.6)).current;
+  const posX = useRef(new Animated.Value(Math.random() * SCREEN_WIDTH)).current;
+  const opacity = useRef(new Animated.Value(0)).current;
+  const scale = useRef(new Animated.Value(0.5 + Math.random() * 0.5)).current;
+
+  useEffect(() => {
+    const animate = () => {
+      posX.setValue(Math.random() * SCREEN_WIDTH);
+      posY.setValue(SCREEN_HEIGHT * 0.8);
+      Animated.parallel([
+        Animated.timing(posY, {
+          toValue: -50,
+          duration: 4000 + Math.random() * 3000,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        }),
+        Animated.sequence([
+          Animated.timing(opacity, { toValue: 0.35, duration: 600, useNativeDriver: true }),
+          Animated.delay(2500),
+          Animated.timing(opacity, { toValue: 0, duration: 800, useNativeDriver: true }),
+        ]),
+      ]).start(animate);
+    };
+    const timer = setTimeout(animate, delay);
+    return () => clearTimeout(timer);
+  }, []);
+
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        styles.particle,
+        {
+          backgroundColor: color,
+          opacity,
+          transform: [{ translateY: posY }, { translateX: posX }, { scale }],
+        },
+      ]}
+    />
+  );
+};
+
+// ─── Main Screen ──────────────────────────────────────────────────────────────
 export const OfflineScreen: React.FC = () => {
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavigationProp>();
-  
+
   const { loadPlaylist, currentSong } = useAudioPlayer();
   const { setPlaylists } = usePlaylistStore();
-  
+
   const [offlinePlaylists, setOfflinePlaylists] = useState<Playlist[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  
-  // Animated states
+
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | null>(null);
   const [displayedSongs, setDisplayedSongs] = useState<Song[]>([]);
   const [songsLoading, setSongsLoading] = useState(false);
@@ -63,53 +335,56 @@ export const OfflineScreen: React.FC = () => {
   const [totalSongs, setTotalSongs] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
-  // Animation values - using useState to maintain stable references
+  // Animation values
   const [expandAnim] = useState(() => new Animated.Value(0));
   const [progressAnim] = useState(() => new Animated.Value(0));
   const [pulseAnim] = useState(() => new Animated.Value(1));
   const [headerAnim] = useState(() => new Animated.Value(0));
+  const [titleSlideAnim] = useState(() => new Animated.Value(-30));
+  const [backdropAnim] = useState(() => new Animated.Value(0));
+  const sheetScaleAnim = useRef(new Animated.Value(0.96)).current;
 
-  // Load offline playlists on mount
+  // ── Init ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     const init = async () => {
       try {
         await loadOfflinePlaylists();
-        Animated.timing(headerAnim, {
-          toValue: 1,
-          duration: 600,
-          useNativeDriver: true,
-        }).start();
-      } catch (err) {
+        Animated.parallel([
+          Animated.timing(headerAnim, {
+            toValue: 1,
+            duration: 700,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+          }),
+          Animated.spring(titleSlideAnim, {
+            toValue: 0,
+            tension: 60,
+            friction: 12,
+            useNativeDriver: true,
+          }),
+        ]).start();
+      } catch {
         setError('Failed to load offline playlists');
       }
     };
     init();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Pulse animation for loading indicator
+  // Pulse for loading
   useEffect(() => {
     if (isLoading || songsLoading) {
-      const animation = Animated.loop(
+      const anim = Animated.loop(
         Animated.sequence([
-          Animated.timing(pulseAnim, {
-            toValue: 1.1,
-            duration: 800,
-            useNativeDriver: true,
-          }),
-          Animated.timing(pulseAnim, {
-            toValue: 1,
-            duration: 800,
-            useNativeDriver: true,
-          }),
+          Animated.timing(pulseAnim, { toValue: 1.15, duration: 700, useNativeDriver: true }),
+          Animated.timing(pulseAnim, { toValue: 1, duration: 700, useNativeDriver: true }),
         ])
       );
-      animation.start();
-      return () => animation.stop();
+      anim.start();
+      return () => anim.stop();
     }
-  }, [isLoading, songsLoading, pulseAnim]);
+  }, [isLoading, songsLoading]);
 
-  // Load offline playlists - using fast method for quick display
+  // ── Data Loading ──────────────────────────────────────────────────────────
   const loadOfflinePlaylists = useCallback(async () => {
     setIsLoading(true);
     try {
@@ -118,84 +393,95 @@ export const OfflineScreen: React.FC = () => {
         setOfflinePlaylists(localPlaylists);
         setPlaylists(localPlaylists);
       }
-    } catch (error) {
-      console.warn('[Offline] Error loading playlists:', error);
+    } catch {
       setOfflinePlaylists([]);
     } finally {
       setIsLoading(false);
     }
   }, [setPlaylists]);
 
-  // Lazy load songs one by one with beautiful animation
-  const lazyLoadSongs = useCallback(async (playlist: Playlist) => {
-    // Animate expand
-    Animated.spring(expandAnim, {
-      toValue: 1,
-      useNativeDriver: true,
-      tension: 50,
-      friction: 8,
-    }).start();
+  const lazyLoadSongs = useCallback(
+    async (playlist: Playlist) => {
+      setSelectedPlaylistId(playlist.id);
+      setDisplayedSongs([]);
+      setSongsLoading(true);
+      setLoadProgress(0);
+      setTotalSongs(playlist.songs.length);
 
-    setSelectedPlaylistId(playlist.id);
-    setDisplayedSongs([]);
-    setSongsLoading(true);
-    setLoadProgress(0);
-    setTotalSongs(playlist.songs.length);
+      // Sheet open animation
+      Animated.parallel([
+        Animated.spring(expandAnim, {
+          toValue: 1,
+          tension: 60,
+          friction: 10,
+          useNativeDriver: true,
+        }),
+        Animated.timing(backdropAnim, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+        Animated.spring(sheetScaleAnim, {
+          toValue: 1,
+          tension: 55,
+          friction: 9,
+          useNativeDriver: true,
+        }),
+      ]).start();
 
-    // Animate progress
-    Animated.timing(progressAnim, {
-      toValue: 0,
-      duration: 100,
-      useNativeDriver: false,
-    }).start();
+      progressAnim.setValue(0);
 
-    // Load songs one by one with animation
-    for (let i = 0; i < playlist.songs.length; i++) {
-      const song = playlist.songs[i];
-      
-      // Add song with animation
-      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-      setDisplayedSongs(prev => [...prev, song]);
-      
-      // Update progress with animation
-      const progress = (i + 1) / playlist.songs.length;
-      Animated.timing(progressAnim, {
-        toValue: progress,
-        duration: 150,
-        useNativeDriver: false,
-      }).start();
-      
-      setLoadProgress(i + 1);
-      
-      // Small delay to visualize loading
-      if (i < playlist.songs.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 80));
+      for (let i = 0; i < playlist.songs.length; i++) {
+        const song = playlist.songs[i];
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        setDisplayedSongs(prev => [...prev, song]);
+
+        Animated.timing(progressAnim, {
+          toValue: (i + 1) / playlist.songs.length,
+          duration: 160,
+          useNativeDriver: false,
+        }).start();
+
+        setLoadProgress(i + 1);
+        if (i < playlist.songs.length - 1) {
+          await new Promise(r => setTimeout(r, 75));
+        }
       }
-    }
-    
-    setSongsLoading(false);
-  }, [expandAnim, progressAnim]);
+      setSongsLoading(false);
+    },
+    [expandAnim, progressAnim, backdropAnim, sheetScaleAnim]
+  );
 
-  // Close expanded view
   const closeExpanded = useCallback(() => {
-    Animated.timing(expandAnim, {
-      toValue: 0,
-      duration: 300,
-      useNativeDriver: true,
-    }).start(() => {
+    Animated.parallel([
+      Animated.timing(expandAnim, {
+        toValue: 0,
+        duration: 360,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(backdropAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+      Animated.timing(sheetScaleAnim, {
+        toValue: 0.96,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
       setSelectedPlaylistId(null);
       setDisplayedSongs([]);
     });
-  }, []);
+  }, [expandAnim, backdropAnim, sheetScaleAnim]);
 
-  // Handle refresh
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
     await loadOfflinePlaylists();
     setIsRefreshing(false);
   }, [loadOfflinePlaylists]);
 
-  // Handle playlist press
   const handlePlaylistPress = (playlist: Playlist) => {
     if (selectedPlaylistId === playlist.id) {
       closeExpanded();
@@ -205,7 +491,6 @@ export const OfflineScreen: React.FC = () => {
     }
   };
 
-  // Handle song press
   const handleSongPress = (song: Song, index: number) => {
     const playlist = offlinePlaylists.find(p => p.id === selectedPlaylistId);
     if (playlist) {
@@ -214,317 +499,364 @@ export const OfflineScreen: React.FC = () => {
     }
   };
 
-  // Get selected playlist
   const selectedPlaylist = offlinePlaylists.find(p => p.id === selectedPlaylistId);
-
-  // Animated values
-  const expandTranslateY = expandAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [500, 0],
-  });
-  
-  const expandOpacity = expandAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, 1],
-  });
-
-  const progressWidth = progressAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0%', '100%'],
-  });
-
-  // Calculate total offline songs
   const totalOfflineSongs = offlinePlaylists.reduce((sum, p) => sum + p.songs.length, 0);
 
-  // Default playlist artwork image for offline playlists
-  const DEFAULT_PLAYLIST_IMAGE = 'https://i.pinimg.com/736x/01/d1/b4/01d1b4547ce03c3ec499c827caac4a72.jpg';
+  const DEFAULT_PLAYLIST_IMAGE =
+    'https://i.pinimg.com/736x/01/d1/b4/01d1b4547ce03c3ec499c827caac4a72.jpg';
 
-  // Generate a color based on playlist name for placeholder
-  const getPlaylistColor = (name: string): string => {
-    const colors_array = [
-      '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
-      '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9',
-      '#F8B500', '#00CED1', '#FF69B4', '#32CD32', '#FF4500',
+  // Music-themed fallback PNG icons (Flaticon CDN — free for UI use)
+  const MUSIC_FALLBACK_IMAGES = [
+    'https://cdn-icons-png.flaticon.com/512/3844/3844724.png', // vinyl record
+    'https://cdn-icons-png.flaticon.com/512/3480/3480864.png', // music note
+    'https://cdn-icons-png.flaticon.com/512/2829/2829986.png', // headphones
+    'https://cdn-icons-png.flaticon.com/512/3373/3373169.png', // guitar
+    'https://cdn-icons-png.flaticon.com/512/1686/1686847.png', // cassette tape
+    'https://cdn-icons-png.flaticon.com/512/4039/4039195.png', // microphone
+    'https://cdn-icons-png.flaticon.com/512/2919/2919592.png', // piano
+    'https://cdn-icons-png.flaticon.com/512/3601/3601645.png', // drum
+  ];
+
+  const getFallbackImage = (name: string): string => {
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) {
+      hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    return MUSIC_FALLBACK_IMAGES[Math.abs(hash) % MUSIC_FALLBACK_IMAGES.length];
+  };
+
+  // Returns a vivid two-stop gradient pair per playlist name
+  const getPlaylistColor = (name: string): string[] => {
+    const pairs: string[][] = [
+      ['#FF6B6B', '#C0392B'],
+      ['#4ECDC4', '#1ABC9C'],
+      ['#45B7D1', '#2980B9'],
+      ['#A29BFE', '#6C5CE7'],
+      ['#FD79A8', '#D63031'],
+      ['#FFEAA7', '#FDCB6E'],
+      ['#55EFC4', '#00B894'],
+      ['#74B9FF', '#0984E3'],
+      ['#FAB1A0', '#E17055'],
+      ['#DDA0DD', '#9B59B6'],
+      ['#F8B500', '#E67E22'],
+      ['#00CED1', '#0097A7'],
+      ['#FF69B4', '#C2185B'],
+      ['#32CD32', '#27AE60'],
+      ['#FF6348', '#D63031'],
     ];
     let hash = 0;
     for (let i = 0; i < name.length; i++) {
       hash = name.charCodeAt(i) + ((hash << 5) - hash);
     }
-    return colors_array[Math.abs(hash) % colors_array.length];
+    return pairs[Math.abs(hash) % pairs.length];
   };
 
-  // Render playlist card with stunning modern UI
-  const renderPlaylistItem = ({ item, index }: { item: Playlist; index: number }) => {
-    const isSelected = selectedPlaylistId === item.id;
-    const playlistColor = getPlaylistColor(item.name);
+  // ── Derived animated styles ───────────────────────────────────────────────
+  const expandTranslateY = expandAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [SCREEN_HEIGHT * 0.7, 0],
+  });
+  const expandOpacity = expandAnim.interpolate({ inputRange: [0, 0.4], outputRange: [0, 1] });
+  const progressWidth = progressAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0%', '100%'],
+  });
 
-    const handlePress = () => {
-      handlePlaylistPress(item);
-    };
+  // ── Render ────────────────────────────────────────────────────────────────
+  const renderPlaylistItem = ({ item, index }: { item: Playlist; index: number }) => (
+    <AnimatedPlaylistCard
+      item={item}
+      index={index}
+      isSelected={selectedPlaylistId === item.id}
+      colors={colors}
+      onPress={() => handlePlaylistPress(item)}
+      DEFAULT_PLAYLIST_IMAGE={DEFAULT_PLAYLIST_IMAGE}
+      getPlaylistColor={getPlaylistColor}
+      getFallbackImage={getFallbackImage}
+    />
+  );
 
-    return (
-      <View style={styles.playlistCardWrapper}>
-        <TouchableOpacity
-          activeOpacity={0.9}
-          onPress={handlePress}
-        >
-          <View style={[
-            styles.playlistCard,
-            { backgroundColor: isSelected ? colors.primary + '20' : colors.surface }
-          ]}>
-            <View style={styles.playlistArtworkContainer}>
-              <Image 
-                source={{ uri: item.artwork || DEFAULT_PLAYLIST_IMAGE }} 
-                style={styles.playlistArtwork} 
-              />
-              <View style={[styles.playOverlay, { backgroundColor: isSelected ? colors.primary : 'rgba(0,0,0,0.4)' }]}>
-                <Ionicons name={isSelected ? "checkmark" : "play"} size={28} color="#FFF" />
-              </View>
-              {item.songs.length > 0 && (
-                <View style={[styles.songCountBadge, { backgroundColor: 'rgba(0,0,0,0.6)' }]}>
-                  <Ionicons name="musical-note" size={10} color="#FFF" />
-                  <Text style={styles.songCountText}>{item.songs.length}</Text>
-                </View>
-              )}
-            </View>
-            <View style={styles.playlistInfoContainer}>
-              <Text style={[styles.playlistName, { color: colors.text }]} numberOfLines={1}>
-                {item.name}
-              </Text>
-              <View style={styles.playlistMeta}>
-                <Ionicons name="cloud-offline" size={12} color={colors.textTertiary} />
-                <Text style={[styles.playlistDescription, { color: colors.textSecondary }]} numberOfLines={1}>
-                  {item.songs.length} songs • Offline
-                </Text>
-              </View>
-            </View>
-          </View>
-        </TouchableOpacity>
-      </View>
-    );
-  };
-
-  // Render song item
   const renderSongItem = ({ item, index }: { item: Song; index: number }) => {
     const isLoaded = displayedSongs.some(s => s.id === item.id);
-
     if (!isLoaded) return null;
-
     return (
-      <View>
-        <SongItem
-          song={item}
-          onPress={() => handleSongPress(item, index)}
-          isPlaying={currentSong?.id === item.id}
-        />
-      </View>
+      <SongItem
+        song={item}
+        onPress={() => handleSongPress(item, index)}
+        isPlaying={currentSong?.id === item.id}
+      />
     );
   };
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* Animated Header */}
-      <Animated.View 
-        style={[
-          styles.header, 
-          { 
-            paddingTop: insets.top + Spacing.sm,
-            opacity: headerAnim,
-            transform: [{
-              translateY: headerAnim.interpolate({
-                inputRange: [0, 1],
-                outputRange: [-20, 0],
-              })
-            }]
-          }
-        ]}
-      >
-        <View>
-          <Text style={[styles.headerTitle, { color: colors.text }]}>Offline</Text>
-          <Text style={[styles.headerSubtitle, { color: colors.textSecondary }]}>
-            {totalOfflineSongs} songs available
-          </Text>
-        </View>
-        <View style={styles.headerRight}>
-          <View style={[styles.statusBadge, { backgroundColor: isLoading ? '#FF9500' : '#34C759' }]}>
-            <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
-              <Ionicons 
-                name={isLoading ? "cloud-download" : "cloud-done"} 
-                size={14} 
-                color="#FFF" 
-              />
-            </Animated.View>
-            <Text style={styles.statusBadgeText}>
-              {isLoading ? 'Syncing' : 'Ready'}
-            </Text>
-          </View>
-        </View>
-      </Animated.View>
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
 
-      {/* Loading State with Animation */}
-      {isLoading ? (
-        <View style={styles.loadingContainer}>
-          <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
-            <View style={[styles.loadingCircle, { borderColor: colors.primary }]}>
-              <Ionicons name="cloud-download-outline" size={48} color={colors.primary} />
-            </View>
-          </Animated.View>
-          <Text style={[styles.loadingTitle, { color: colors.text }]}>
-            Syncing Library
-          </Text>
-          <Text style={[styles.loadingSubtitle, { color: colors.textSecondary }]}>
-            Loading your offline songs...
-          </Text>
-        </View>
-      ) : (
+      {/* Ambient floating particles */}
+      {!isLoading && offlinePlaylists.length > 0 && (
         <>
-          {/* Playlist Grid */}
-          <FlatList
-            data={offlinePlaylists}
-            keyExtractor={(item) => item.id}
-            renderItem={renderPlaylistItem}
-            numColumns={2}
-            columnWrapperStyle={styles.playlistRow}
-            contentContainerStyle={styles.playlistGrid}
-            showsVerticalScrollIndicator={false}
-            ListEmptyComponent={
-              <View style={styles.emptyContainer}>
-                <LinearGradient
-                  colors={isDark ? ['#1a1a2e', '#16213e'] : ['#f5f5f5', '#e8e8e8']}
-                  style={styles.emptyGradient}
-                >
-                  <View style={styles.emptyIconContainer}>
-                    <Ionicons name="cloud-offline-outline" size={80} color={colors.primary} />
-                  </View>
-                  <Text style={[styles.emptyTitle, { color: colors.text }]}>
-                    No Offline Songs
-                  </Text>
-                  <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
-                    Download playlists from Google Drive{'\n'}to listen offline
-                  </Text>
-                  <TouchableOpacity 
-                    style={[styles.downloadButton, { backgroundColor: colors.primary }]}
-                    onPress={() => navigation.navigate('Settings' as never)}
-                  >
-                    <Ionicons name="download-outline" size={20} color="#FFF" />
-                    <Text style={styles.downloadButtonText}>Go to Downloads</Text>
-                  </TouchableOpacity>
-                </LinearGradient>
-              </View>
-            }
-            refreshControl={
-              <RefreshControl
-                refreshing={isRefreshing}
-                onRefresh={handleRefresh}
-                tintColor={colors.primary}
-              />
-            }
-          />
+          {[...Array(6)].map((_, i) => (
+            <FloatingParticle
+              key={i}
+              color={colors.primary}
+              delay={i * 700}
+            />
+          ))}
         </>
       )}
 
-      {/* Expanded Playlist Sheet */}
+      {/* ── Header ── */}
+      <Animated.View
+        style={[
+          styles.header,
+          {
+            paddingTop: insets.top + Spacing.sm,
+            opacity: headerAnim,
+          },
+        ]}
+      >
+        <Animated.View style={{ transform: [{ translateY: titleSlideAnim }] }}>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>Offline</Text>
+          <Text style={[styles.headerSubtitle, { color: colors.textSecondary }]}>
+            {totalOfflineSongs} songs ready
+          </Text>
+        </Animated.View>
+
+        <View style={styles.headerRight}>
+          <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+            <View
+              style={[
+                styles.statusPill,
+                { backgroundColor: isLoading ? '#FF9500' : '#34C759' },
+              ]}
+            >
+              <Ionicons
+                name={isLoading ? 'cloud-download' : 'cloud-done'}
+                size={13}
+                color="#FFF"
+              />
+              <Text style={styles.statusPillText}>{isLoading ? 'Syncing' : 'Ready'}</Text>
+            </View>
+          </Animated.View>
+        </View>
+      </Animated.View>
+
+      {/* ── Loading State ── */}
+      {isLoading ? (
+        <View style={styles.loadingContainer}>
+          <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+            <LinearGradient
+              colors={[colors.primary + '30', colors.primary + '10']}
+              style={styles.loadingOrb}
+            >
+              <Ionicons name="cloud-download-outline" size={52} color={colors.primary} />
+            </LinearGradient>
+          </Animated.View>
+          <Text style={[styles.loadingTitle, { color: colors.text }]}>Syncing Library</Text>
+          <Text style={[styles.loadingSubtitle, { color: colors.textSecondary }]}>
+            Finding your offline songs…
+          </Text>
+        </View>
+      ) : (
+        /* ── Playlist Grid ── */
+        <FlatList
+          data={offlinePlaylists}
+          keyExtractor={item => item.id}
+          renderItem={renderPlaylistItem}
+          numColumns={2}
+          columnWrapperStyle={styles.gridRow}
+          contentContainerStyle={[styles.gridContent, { paddingBottom: currentSong ? 200 : 120 }]}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={handleRefresh}
+              tintColor={colors.primary}
+            />
+          }
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <LinearGradient
+                colors={isDark ? ['#1a1a2e', '#16213e'] : ['#f5f5f5', '#e8e8e8']}
+                style={styles.emptyCard}
+              >
+                <Ionicons name="cloud-offline-outline" size={72} color={colors.primary} />
+                <Text style={[styles.emptyTitle, { color: colors.text }]}>No Offline Songs</Text>
+                <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
+                  Download playlists from Google Drive{'\n'}to listen offline
+                </Text>
+                <TouchableOpacity
+                  style={[styles.goToBtn, { backgroundColor: colors.primary }]}
+                  onPress={() => navigation.navigate('Settings')}
+                >
+                  <Ionicons name="download-outline" size={18} color="#FFF" />
+                  <Text style={styles.goToBtnText}>Go to Downloads</Text>
+                </TouchableOpacity>
+              </LinearGradient>
+            </View>
+          }
+        />
+      )}
+
+      {/* ── Backdrop when sheet open ── */}
       {selectedPlaylist && (
-        <Animated.View 
+        <Animated.View
+          pointerEvents="box-none"
           style={[
-            styles.expandedSheet,
+            StyleSheet.absoluteFillObject,
+            {
+              backgroundColor: 'rgba(0,0,0,0.45)',
+              opacity: backdropAnim,
+              zIndex: 99,
+            },
+          ]}
+        >
+          <TouchableOpacity
+            style={StyleSheet.absoluteFillObject}
+            onPress={closeExpanded}
+            activeOpacity={1}
+          />
+        </Animated.View>
+      )}
+
+      {/* ── Expanded Sheet ── */}
+      {selectedPlaylist && (
+        <Animated.View
+          style={[
+            styles.sheet,
             {
               opacity: expandOpacity,
-              transform: [{ translateY: expandTranslateY }],
-            }
+              transform: [
+                { translateY: expandTranslateY },
+                { scale: sheetScaleAnim },
+              ],
+              zIndex: 100,
+            },
           ]}
         >
           <LinearGradient
-            colors={isDark 
-              ? ['rgba(30,30,30,0.98)', 'rgba(20,20,20,0.98)'] 
-              : ['rgba(255,255,255,0.98)', 'rgba(245,245,245,0.98)']
+            colors={
+              isDark
+                ? ['rgba(28,28,32,0.99)', 'rgba(18,18,20,0.99)']
+                : ['rgba(255,255,255,0.99)', 'rgba(242,242,247,0.99)']
             }
-            style={styles.expandedGradient}
+            style={styles.sheetInner}
           >
-            {/* Drag Handle */}
-            <View style={styles.dragHandleContainer}>
+            {/* Drag handle */}
+            <View style={styles.dragHandleRow}>
               <View style={[styles.dragHandle, { backgroundColor: colors.textTertiary }]} />
             </View>
 
-            {/* Expanded Header */}
-            <View style={styles.expandedHeader}>
-              <View style={styles.expandedInfo}>
-                <Image 
-                  source={{ uri: selectedPlaylist.artwork || DEFAULT_PLAYLIST_IMAGE }} 
-                  style={styles.expandedArtwork} 
+            {/* Sheet header with artwork */}
+            <View style={styles.sheetHeader}>
+              <View style={styles.sheetArtworkWrap}>
+                <Image
+                  source={{ uri: selectedPlaylist.artwork || getFallbackImage(selectedPlaylist.name) }}
+                  style={styles.sheetArtwork}
+                  resizeMode="cover"
+                  onError={(e) => {/* silently falls to tint */ }}
+                  defaultSource={{ uri: getFallbackImage(selectedPlaylist.name) }}
                 />
-                <View style={styles.expandedTextContainer}>
-                  <Text style={[styles.expandedTitle, { color: colors.text }]} numberOfLines={1}>
-                    {selectedPlaylist.name}
-                  </Text>
-                  <Text style={[styles.expandedSubtitle, { color: colors.textSecondary }]}>
-                    {selectedPlaylist.songs.length} songs • Offline
+                <LinearGradient
+                  colors={['transparent', 'rgba(0,0,0,0.5)']}
+                  style={StyleSheet.absoluteFillObject}
+                />
+              </View>
+
+              <View style={styles.sheetTitleBlock}>
+                <Text style={[styles.sheetTitle, { color: colors.text }]} numberOfLines={2}>
+                  {selectedPlaylist.name}
+                </Text>
+                <View style={styles.sheetMeta}>
+                  <View style={styles.offlineDotLg} />
+                  <Text style={[styles.sheetMetaText, { color: colors.textSecondary }]}>
+                    {selectedPlaylist.songs.length} songs · Offline
                   </Text>
                 </View>
               </View>
-              <TouchableOpacity onPress={closeExpanded} style={styles.closeButton}>
-                <Ionicons name="chevron-down" size={28} color={colors.text} />
+
+              <TouchableOpacity onPress={closeExpanded} style={styles.closeBtn}>
+                <Ionicons name="chevron-down" size={26} color={colors.text} />
               </TouchableOpacity>
             </View>
 
-            {/* Animated Progress Bar */}
+            {/* Progress bar */}
             {songsLoading && (
-              <View style={styles.progressSection}>
-                <View style={[styles.progressBackground, { backgroundColor: colors.surfaceSecondary }]}>
-                  <Animated.View 
+              <View style={styles.progressWrap}>
+                <View
+                  style={[
+                    styles.progressTrack,
+                    { backgroundColor: colors.surfaceSecondary },
+                  ]}
+                >
+                  <Animated.View
                     style={[
-                      styles.progressBarAnimated, 
-                      { 
-                        width: progressWidth, 
-                        backgroundColor: colors.primary 
-                      }
-                    ]} 
+                      styles.progressFill,
+                      { width: progressWidth, backgroundColor: colors.primary },
+                    ]}
+                  />
+                  {/* Glow tip */}
+                  <Animated.View
+                    style={[
+                      styles.progressGlowTip,
+                      {
+                        left: progressWidth,
+                        backgroundColor: colors.primary,
+                        shadowColor: colors.primary,
+                      },
+                    ]}
                   />
                 </View>
-                <View style={styles.progressInfo}>
-                  <View style={styles.progressDots}>
-                    {[...Array(3)].map((_, i) => (
-                      <Animated.View 
-                        key={i}
-                        style={[
-                          styles.progressDot,
-                          { backgroundColor: i < (loadProgress > 0 ? 1 : 0) ? colors.primary : colors.textTertiary }
-                        ]}
-                      />
-                    ))}
-                  </View>
-                  <Text style={[styles.progressText, { color: colors.textSecondary }]}>
-                    {loadProgress} / {totalSongs} synced
-                  </Text>
-                </View>
+                <Text style={[styles.progressLabel, { color: colors.textSecondary }]}>
+                  {loadProgress} / {totalSongs} loaded
+                </Text>
               </View>
             )}
 
-            {/* Play All Button */}
-            <View style={styles.playAllContainer}>
-              <TouchableOpacity 
-                style={[styles.playAllButton, { backgroundColor: colors.primary }]}
+            {/* Play All */}
+            <View style={styles.playAllRow}>
+              <TouchableOpacity
+                style={[styles.playAllBtn, { backgroundColor: colors.primary }]}
                 onPress={() => {
                   if (selectedPlaylist.songs.length > 0) {
                     loadPlaylist(selectedPlaylist.songs, 0);
                     navigation.navigate('Player');
                   }
                 }}
+                activeOpacity={0.85}
               >
-                <Ionicons name="play" size={24} color="#FFF" />
-                <Text style={styles.playAllButtonText}>Play All</Text>
+                <Ionicons name="play" size={20} color="#FFF" />
+                <Text style={styles.playAllText}>Play All</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.shuffleBtn,
+                  { backgroundColor: colors.surfaceSecondary },
+                ]}
+                onPress={() => {
+                  if (selectedPlaylist.songs.length > 0) {
+                    const shuffled = [...selectedPlaylist.songs].sort(() => Math.random() - 0.5);
+                    loadPlaylist(shuffled, 0);
+                    navigation.navigate('Player');
+                  }
+                }}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="shuffle" size={20} color={colors.primary} />
+                <Text style={[styles.shuffleText, { color: colors.primary }]}>Shuffle</Text>
               </TouchableOpacity>
             </View>
 
-            {/* Songs List */}
+            {/* Songs */}
             <FlatList
               data={selectedPlaylist.songs}
-              keyExtractor={(item) => item.id}
+              keyExtractor={item => item.id}
               renderItem={renderSongItem}
-              contentContainerStyle={styles.songsListContainer}
+              contentContainerStyle={styles.songsContent}
               showsVerticalScrollIndicator={false}
-              initialNumToRender={10}
-              maxToRenderPerBatch={10}
+              initialNumToRender={12}
+              maxToRenderPerBatch={12}
               windowSize={5}
             />
           </LinearGradient>
@@ -533,7 +865,7 @@ export const OfflineScreen: React.FC = () => {
 
       {/* Mini Player */}
       {currentSong && (
-        <View style={[styles.miniPlayerContainer, { bottom: 60 + insets.bottom }]}>
+        <View style={[styles.miniPlayerWrap, { bottom: 60 + insets.bottom }]}>
           <MiniPlayer onPress={() => navigation.navigate('Player')} />
         </View>
       )}
@@ -541,10 +873,47 @@ export const OfflineScreen: React.FC = () => {
   );
 };
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
+  container: { flex: 1 },
+
+  // Fallback thumbnail
+  fallbackIcon: {
+    width: '65%',
+    height: '65%',
+    tintColor: 'rgba(255,255,255,0.92)',
   },
+  gradientFallback: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  noteFallbackContainer: {
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    gap: 6,
+  },
+  noteFallbackEmoji: {
+    fontSize: 32,
+  },
+  noteFallbackName: {
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: 11,
+    fontWeight: '700',
+    textAlign: 'center',
+    letterSpacing: 0.2,
+  },
+
+  // Particle
+  particle: {
+    position: 'absolute',
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    top: 0,
+    left: 0,
+  },
+
+  // Header
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -553,318 +922,222 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.md,
   },
   headerTitle: {
-    fontSize: 34,
-    fontWeight: 'bold',
-    letterSpacing: -0.5,
+    fontSize: 36,
+    fontWeight: '800',
+    letterSpacing: -0.8,
   },
   headerSubtitle: {
     fontSize: FontSize.md,
-    marginTop: 2,
+    marginTop: 3,
+    fontWeight: '400',
   },
-  headerRight: {
-    alignItems: 'flex-end',
-  },
-  statusBadge: {
+  headerRight: { alignItems: 'flex-end', justifyContent: 'flex-start', paddingTop: 6 },
+  statusPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 6,
-    borderRadius: 16,
-    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+    gap: 5,
   },
-  statusBadgeText: {
-    color: '#FFF',
-    fontSize: FontSize.sm,
-    fontWeight: '600',
-  },
-  loadingContainer: {
-    flex: 1,
+  statusPillText: { color: '#FFF', fontSize: FontSize.sm, fontWeight: '700' },
+
+  // Loading
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 16 },
+  loadingOrb: {
+    width: 130,
+    height: 130,
+    borderRadius: 65,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  loadingCircle: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    borderWidth: 3,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: Spacing.lg,
-  },
-  loadingTitle: {
-    fontSize: FontSize.xl,
-    fontWeight: '700',
-    marginBottom: Spacing.xs,
-  },
-  loadingSubtitle: {
-    fontSize: FontSize.md,
-    textAlign: 'center',
-  },
-  playlistRow: {
-    justifyContent: 'space-between',
-    paddingHorizontal: Spacing.md,
-    marginBottom: Spacing.md,
-  },
-  playlistGrid: {
-    paddingHorizontal: Spacing.sm,
-    paddingTop: Spacing.sm,
-    paddingBottom: 150,
-  },
-  playlistCardWrapper: {
-    width: '48%',
-    marginBottom: Spacing.md,
+  loadingTitle: { fontSize: FontSize.xl, fontWeight: '700', marginTop: 8 },
+  loadingSubtitle: { fontSize: FontSize.md, textAlign: 'center' },
+
+  // Grid
+  gridRow: { justifyContent: 'space-between', paddingHorizontal: Spacing.md },
+  gridContent: { paddingHorizontal: Spacing.sm, paddingTop: Spacing.sm },
+
+  // Playlist card
+  cardWrapper: { width: '48%', marginBottom: Spacing.lg },
+  glowBorder: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: BorderRadius.xl,
+    borderWidth: 2,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 12,
+    elevation: 10,
   },
   playlistCard: {
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.sm,
+    borderRadius: BorderRadius.xl,
+    overflow: 'hidden',
     ...Platform.select({
       ios: {
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 8,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.14,
+        shadowRadius: 12,
       },
-      android: {
-        elevation: 3,
-      },
+      android: { elevation: 5 },
     }),
   },
-  playlistArtworkContainer: {
-    position: 'relative',
+  artworkFrame: {
     width: '100%',
     aspectRatio: 1,
-    borderRadius: BorderRadius.md,
-    overflow: 'hidden',
-    marginBottom: Spacing.sm,
+    position: 'relative',
   },
-  playlistArtwork: {
+  artworkImage: {
     width: '100%',
     height: '100%',
   },
-  playlistArtworkPlaceholder: {
-    width: '100%',
-    height: '100%',
+  playBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1.5,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  playlistArtworkGradient: {
-    width: '100%',
-    height: '100%',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderRadius: BorderRadius.md,
-  },
-  artworkOverlay: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
-  },
-  artworkEmoji: {
-    fontSize: 28,
-  },
-  playlistInfoContainer: {
-    paddingTop: Spacing.sm,
-  },
-  playlistMeta: {
+  countPill: {
+    position: 'absolute',
+    bottom: 8,
+    left: 8,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    marginTop: 2,
-  },
-  playOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  songCountBadge: {
-    position: 'absolute',
-    bottom: 6,
-    right: 6,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    gap: 3,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
     borderRadius: 10,
   },
-  songCountText: {
-    color: '#FFF',
-    fontSize: 10,
-    fontWeight: '600',
+  countPillText: { color: '#FFF', fontSize: 10, fontWeight: '700' },
+  cardInfo: { padding: Spacing.sm },
+  cardName: { fontSize: FontSize.md, fontWeight: '700', marginBottom: 4 },
+  cardMeta: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  offlineDot: { width: 6, height: 6, borderRadius: 3 },
+  cardMetaText: { fontSize: FontSize.sm },
+  selectedAccentLine: {
+    height: 3,
+    width: '40%',
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: Spacing.xs,
   },
-  playlistName: {
-    fontSize: FontSize.md,
-    fontWeight: '600',
-    marginBottom: 2,
-  },
-  playlistDescription: {
-    fontSize: FontSize.sm,
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingTop: 100,
-  },
-  emptyGradient: {
+
+  // Empty
+  emptyContainer: { flex: 1, alignItems: 'center', paddingTop: 80 },
+  emptyCard: {
     alignItems: 'center',
     padding: Spacing.xl,
     borderRadius: BorderRadius.xl,
     marginHorizontal: Spacing.lg,
+    gap: 12,
   },
-  emptyIconContainer: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: 'rgba(255, 55, 95, 0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: Spacing.lg,
-  },
-  emptyTitle: {
-    fontSize: FontSize.xxl,
-    fontWeight: '700',
-    marginBottom: Spacing.sm,
-  },
-  emptySubtitle: {
-    fontSize: FontSize.md,
-    textAlign: 'center',
-    marginBottom: Spacing.lg,
-    lineHeight: 22,
-  },
-  downloadButton: {
+  emptyTitle: { fontSize: FontSize.xxl, fontWeight: '700' },
+  emptySubtitle: { fontSize: FontSize.md, textAlign: 'center', lineHeight: 22 },
+  goToBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: Spacing.sm,
     paddingHorizontal: Spacing.lg,
     borderRadius: 25,
     gap: 8,
+    marginTop: 4,
   },
-  downloadButtonText: {
-    color: '#FFF',
-    fontSize: FontSize.md,
-    fontWeight: '600',
-  },
-  expandedSheet: {
+  goToBtnText: { color: '#FFF', fontSize: FontSize.md, fontWeight: '600' },
+
+  // Sheet
+  sheet: {
     ...StyleSheet.absoluteFillObject,
-    top: 100,
-    zIndex: 100,
+    top: 90,
   },
-  expandedGradient: {
+  sheetInner: {
     flex: 1,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
   },
-  dragHandleContainer: {
-    alignItems: 'center',
-    paddingVertical: Spacing.sm,
-  },
-  dragHandle: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    opacity: 0.3,
-  },
-  expandedHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.sm,
-  },
-  expandedInfo: {
+  dragHandleRow: { alignItems: 'center', paddingVertical: 10 },
+  dragHandle: { width: 38, height: 4, borderRadius: 2, opacity: 0.35 },
+  sheetHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    flex: 1,
-  },
-  expandedArtworkContainer: {
-    width: 60,
-    height: 60,
-    borderRadius: BorderRadius.md,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: Spacing.md,
-  },
-  expandedArtwork: {
-    width: 60,
-    height: 60,
-    borderRadius: BorderRadius.md,
-  },
-  expandedArtworkGradient: {
-    width: 60,
-    height: 60,
-    borderRadius: BorderRadius.md,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  expandedTextContainer: {
-    flex: 1,
-  },
-  expandedTitle: {
-    fontSize: FontSize.xl,
-    fontWeight: '700',
-  },
-  expandedSubtitle: {
-    fontSize: FontSize.sm,
-    marginTop: 2,
-  },
-  closeButton: {
-    padding: Spacing.xs,
-  },
-  progressSection: {
     paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.sm,
+    paddingBottom: Spacing.md,
+    gap: Spacing.md,
   },
-  progressBackground: {
-    height: 4,
-    borderRadius: 2,
+  sheetArtworkWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 14,
     overflow: 'hidden',
+    flexShrink: 0,
   },
-  progressBarAnimated: {
-    height: '100%',
-    borderRadius: 2,
+  sheetArtwork: { width: '100%', height: '100%' },
+  sheetTitleBlock: { flex: 1 },
+  sheetTitle: { fontSize: FontSize.xl, fontWeight: '800', letterSpacing: -0.3 },
+  sheetMeta: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
+  offlineDotLg: { width: 7, height: 7, borderRadius: 3.5, backgroundColor: '#34C759' },
+  sheetMetaText: { fontSize: FontSize.sm },
+  closeBtn: { padding: 4 },
+
+  // Progress
+  progressWrap: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.sm },
+  progressTrack: {
+    height: 5,
+    borderRadius: 3,
+    overflow: 'visible',
+    position: 'relative',
   },
-  progressInfo: {
+  progressFill: { height: '100%', borderRadius: 3 },
+  progressGlowTip: {
+    position: 'absolute',
+    top: -3,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginLeft: -5,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 1,
+    shadowRadius: 6,
+    elevation: 6,
+  },
+  progressLabel: { fontSize: FontSize.sm, marginTop: 6, textAlign: 'right' },
+
+  // Play all / Shuffle
+  playAllRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: Spacing.sm,
-  },
-  progressDots: {
-    flexDirection: 'row',
-    gap: 4,
-  },
-  progressDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  progressText: {
-    fontSize: FontSize.sm,
-  },
-  playAllContainer: {
     paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.sm,
+    paddingBottom: Spacing.md,
+    gap: Spacing.sm,
   },
-  playAllButton: {
+  playAllBtn: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: Spacing.sm,
+    paddingVertical: 13,
     borderRadius: 25,
     gap: 8,
   },
-  playAllButtonText: {
-    color: '#FFF',
-    fontSize: FontSize.md,
-    fontWeight: '600',
+  playAllText: { color: '#FFF', fontSize: FontSize.md, fontWeight: '700' },
+  shuffleBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 13,
+    borderRadius: 25,
+    gap: 8,
   },
-  songsListContainer: {
-    paddingBottom: 150,
-    paddingHorizontal: Spacing.md,
-  },
-  miniPlayerContainer: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-  },
+  shuffleText: { fontSize: FontSize.md, fontWeight: '700' },
+
+  // Songs
+  songsContent: { paddingHorizontal: Spacing.md, paddingBottom: 160 },
+
+  // Mini player
+  miniPlayerWrap: { position: 'absolute', left: 0, right: 0 },
 });
