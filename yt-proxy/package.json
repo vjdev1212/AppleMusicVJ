@@ -4,7 +4,7 @@
   "main": "proxy-server.js",
   "dependencies": {
     "express": "*",
-    "yt-dlp-exec": "*",
+    "axios": "*",
     "cors": "*"
   },
   "scripts": {
