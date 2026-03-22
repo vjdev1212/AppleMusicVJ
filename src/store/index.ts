@@ -40,6 +40,9 @@ interface SettingsStore extends AppSettings {
   setYoutubeApiKey: (apiKey: string) => void;
   setSpotifyClientId: (clientId: string) => void;
   setSpotifyClientSecret: (secret: string) => void;
+  // ── New ──
+  testUser: string;
+  setTestUser: (email: string) => void;
 }
 
 interface PlaylistStore {
@@ -73,33 +76,33 @@ export const usePlayerStore = create<PlayerStore>()((set, get) => ({
   setIsPlaying: (isPlaying) => set({ isPlaying }),
   setCurrentTime: (currentTime) => set({ currentTime }),
   setDuration: (duration) => set({ duration }),
-  
-  setQueue: (queue, startIndex = 0) => set({ 
-    queue, 
+
+  setQueue: (queue, startIndex = 0) => set({
+    queue,
     queueIndex: startIndex,
-    currentSong: queue[startIndex] || null 
+    currentSong: queue[startIndex] || null,
   }),
-  
-  addToQueue: (song) => set((state) => ({ 
-    queue: [...state.queue, song] 
+
+  addToQueue: (song) => set((state) => ({
+    queue: [...state.queue, song],
   })),
-  
+
   removeFromQueue: (index) => set((state) => ({
-    queue: state.queue.filter((_, i) => i !== index)
+    queue: state.queue.filter((_, i) => i !== index),
   })),
-  
+
   clearQueue: () => set({ queue: [], queueIndex: 0, currentSong: null }),
-  
+
   setShuffle: (shuffle) => set({ shuffle }),
   setRepeat: (repeat) => set({ repeat }),
   setVolume: (volume) => set({ volume }),
-  
+
   playNext: () => {
     const { queue, queueIndex, shuffle, repeat } = get();
     if (queue.length === 0) return;
 
     let nextIndex = queueIndex + 1;
-    
+
     if (shuffle) {
       nextIndex = Math.floor(Math.random() * queue.length);
     } else if (nextIndex >= queue.length) {
@@ -110,18 +113,17 @@ export const usePlayerStore = create<PlayerStore>()((set, get) => ({
       }
     }
 
-    set({ 
+    set({
       queueIndex: nextIndex,
       currentSong: queue[nextIndex],
-      currentTime: 0
+      currentTime: 0,
     });
   },
-  
+
   playPrevious: () => {
     const { queue, queueIndex, currentTime } = get();
     if (queue.length === 0) return;
 
-    // If more than 3 seconds in, restart current song
     if (currentTime > 3) {
       set({ currentTime: 0 });
       return;
@@ -132,13 +134,13 @@ export const usePlayerStore = create<PlayerStore>()((set, get) => ({
       prevIndex = queue.length - 1;
     }
 
-    set({ 
+    set({
       queueIndex: prevIndex,
       currentSong: queue[prevIndex],
-      currentTime: 0
+      currentTime: 0,
     });
   },
-  
+
   togglePlayPause: () => {
     const { isPlaying } = get();
     set({ isPlaying: !isPlaying });
@@ -156,27 +158,24 @@ export const useGoogleDriveStore = create<GoogleDriveStore>()((set) => ({
   scanProgress: 0,
   scanStatus: '',
 
-  setConnected: (connected, accessToken, refreshToken, email) => set({ 
+  setConnected: (connected, accessToken, refreshToken, email) => set({
     isConnected: connected,
     accessToken: accessToken || null,
     refreshToken: refreshToken || null,
-    email: email || null
+    email: email || null,
   }),
-  
-  setDisconnected: () => set({ 
+
+  setDisconnected: () => set({
     isConnected: false,
     accessToken: null,
     refreshToken: null,
     email: null,
-    lastScan: null
+    lastScan: null,
   }),
-  
-  setLastScan: (date) => set({ lastScan: date }),
 
+  setLastScan: (date) => set({ lastScan: date }),
   setScanning: (isScanning) => set({ isScanning }),
-  
   setScanProgress: (scanProgress) => set({ scanProgress }),
-  
   setScanStatus: (scanStatus) => set({ scanStatus }),
 }));
 
@@ -189,11 +188,15 @@ export const useSettingsStore = create<SettingsStore>()((set) => ({
   isOfflineMode: true,
   downloadPath: 'downloads/',
   streamingUrls: [],
-  // API Tokens - Default values
+
+  // API Tokens
   googleDriveClientId: '706156834841-89cufgqr5n44h81utu4b9lg1dt3jk9mh.apps.googleusercontent.com',
   youtubeApiKey: 'AIzaSyBb6sozj32MeGUsOAE_06peS7GH16CPLi8',
   spotifyClientId: '',
   spotifyClientSecret: '',
+
+  // ── Test user email (configurable from Settings screen) ──
+  testUser: '',
 
   setTheme: (theme) => set({ theme }),
   setBackgroundPlayback: (backgroundPlayback) => set({ backgroundPlayback }),
@@ -201,19 +204,22 @@ export const useSettingsStore = create<SettingsStore>()((set) => ({
   setCacheStreaming: (cacheStreaming) => set({ cacheStreaming }),
   setOfflineMode: (isOfflineMode) => set({ isOfflineMode }),
   setDownloadPath: (downloadPath) => set({ downloadPath }),
-  
+
   addStreamingUrl: (url) => set((state) => ({
-    streamingUrls: [...state.streamingUrls, url]
+    streamingUrls: [...state.streamingUrls, url],
   })),
-  
+
   removeStreamingUrl: (url) => set((state) => ({
-    streamingUrls: state.streamingUrls.filter((u) => u !== url)
+    streamingUrls: state.streamingUrls.filter((u) => u !== url),
   })),
 
   setGoogleDriveClientId: (googleDriveClientId) => set({ googleDriveClientId }),
   setYoutubeApiKey: (youtubeApiKey) => set({ youtubeApiKey }),
   setSpotifyClientId: (spotifyClientId) => set({ spotifyClientId }),
   setSpotifyClientSecret: (spotifyClientSecret) => set({ spotifyClientSecret }),
+
+  // ── New ──
+  setTestUser: (testUser) => set({ testUser }),
 }));
 
 // Playlist Store
@@ -223,52 +229,52 @@ export const usePlaylistStore = create<PlaylistStore>()((set) => ({
   favorites: [],
 
   setPlaylists: (playlists) => set({ playlists }),
-  
+
   addPlaylist: (playlist) => set((state) => ({
-    playlists: [...state.playlists, playlist]
+    playlists: [...state.playlists, playlist],
   })),
-  
+
   updatePlaylist: (id, updates) => set((state) => ({
-    playlists: state.playlists.map((p) => 
+    playlists: state.playlists.map((p) =>
       p.id === id ? { ...p, ...updates } : p
-    )
+    ),
   })),
-  
+
   removePlaylist: (id) => set((state) => ({
-    playlists: state.playlists.filter((p) => p.id !== id)
+    playlists: state.playlists.filter((p) => p.id !== id),
   })),
-  
+
   addToRecentlyPlayed: (song) => set((state) => {
     const filtered = state.recentlyPlayed.filter((s) => s.id !== song.id);
-    return { 
-      recentlyPlayed: [song, ...filtered].slice(0, 50) 
+    return {
+      recentlyPlayed: [song, ...filtered].slice(0, 50),
     };
   }),
-  
+
   addToFavorites: (song) => set((state) => ({
-    favorites: [...state.favorites, song]
+    favorites: [...state.favorites, song],
   })),
-  
+
   removeFromFavorites: (songId) => set((state) => ({
-    favorites: state.favorites.filter((s) => s.id !== songId)
+    favorites: state.favorites.filter((s) => s.id !== songId),
   })),
 
   addSongToPlaylist: (playlistId, song) => set((state) => ({
-    playlists: state.playlists.map((p) => 
-      p.id === playlistId 
-        ? { ...p, songs: [...p.songs, song] } 
+    playlists: state.playlists.map((p) =>
+      p.id === playlistId
+        ? { ...p, songs: [...p.songs, song] }
         : p
-    )
+    ),
   })),
 
   updateSongInPlaylist: (playlistId, songId, updates) => set((state) => ({
-    playlists: state.playlists.map((p) => 
-      p.id === playlistId 
-        ? { 
-            ...p, 
-            songs: p.songs.map((s) => s.id === songId ? { ...s, ...updates } : s)
-          } 
+    playlists: state.playlists.map((p) =>
+      p.id === playlistId
+        ? {
+          ...p,
+          songs: p.songs.map((s) => s.id === songId ? { ...s, ...updates } : s),
+        }
         : p
-    )
+    ),
   })),
 }));

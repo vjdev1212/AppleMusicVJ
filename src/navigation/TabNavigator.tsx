@@ -77,42 +77,42 @@ export const TabNavigator = () => {
         },
       })}
     >
-      <Tab.Screen 
-        name="Home" 
-        component={HomeScreen} 
-        options={{ 
+      <Tab.Screen
+        name="Home"
+        component={HomeScreen}
+        options={{
           title: 'Home',
           tabBarLabel: 'Home',
         }}
       />
-      <Tab.Screen 
-        name="Search" 
-        component={SearchScreen} 
-        options={{ 
+      <Tab.Screen
+        name="Search"
+        component={SearchScreen}
+        options={{
           title: 'Search',
           tabBarLabel: 'Search',
         }}
       />
-      <Tab.Screen 
-        name="YouTube" 
-        component={OnlineScreen} 
-        options={{ 
+      <Tab.Screen
+        name="YouTube"
+        component={OnlineScreen}
+        options={{
           title: 'YouTube',
           tabBarLabel: 'YouTube',
         }}
       />
-      <Tab.Screen 
-        name="Offline" 
-        component={OfflineScreen} 
-        options={{ 
+      <Tab.Screen
+        name="Offline"
+        component={OfflineScreen}
+        options={{
           title: 'Offline',
           tabBarLabel: 'Downloads',
         }}
       />
-      <Tab.Screen 
-        name="Settings" 
-        component={SettingsScreen} 
-        options={{ 
+      <Tab.Screen
+        name="Settings"
+        component={SettingsScreen}
+        options={{
           title: 'Settings',
           tabBarLabel: 'Settings',
         }}

@@ -442,6 +442,7 @@ export const HomeScreen: React.FC = () => {
   } = useGoogleDriveStore();
 
   const [refreshing, setRefreshing] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
   const headerFadeAnim = useRef(new Animated.Value(0)).current;
   const headerSlideAnim = useRef(new Animated.Value(-24)).current;
 
@@ -475,17 +476,28 @@ export const HomeScreen: React.FC = () => {
     ]).start();
 
     const checkGoogleDrive = async () => {
-      const connected = await googleDriveService.isConnected();
-      if (connected) {
-        setConnected(true);
-        try {
-          const musicPlaylist = await googleDriveService.autoScanMusicFolder();
-          if (musicPlaylist.length > 0) setPlaylists(musicPlaylist);
-        } catch { }
-        finally { setLastScan(new Date()); }
-      } else {
-        setConnected(false);
-        setPlaylists([]);
+      setIsReconnecting(true);
+      try {
+        // isConnected() now auto-refreshes the token silently if expired
+        const connected = await googleDriveService.isConnected();
+        setIsReconnecting(false);
+        if (connected) {
+          setConnected(true);
+          try {
+            // parallel scan — much faster than sequential
+            const musicPlaylists = await googleDriveService.autoScanMusicFolder();
+            if (musicPlaylists.length > 0) setPlaylists(musicPlaylists);
+          } catch (e) {
+            console.warn('[Home] Scan failed:', e);
+          } finally {
+            setLastScan(new Date());
+          }
+        } else {
+          setConnected(false);
+          setPlaylists([]);
+        }
+      } catch {
+        setIsReconnecting(false);
       }
     };
     checkGoogleDrive();
@@ -493,18 +505,30 @@ export const HomeScreen: React.FC = () => {
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    const connected = await googleDriveService.isConnected();
-    if (connected) {
-      setConnected(true);
-      try {
-        const musicPlaylist = await googleDriveService.autoScanMusicFolder();
-        if (musicPlaylist.length > 0)
-          setPlaylists([...playlists.filter(p => !p.id.startsWith('gdrive-')), ...musicPlaylist]);
-      } catch { }
-      finally { setLastScan(new Date()); }
-    } else {
-      setConnected(false);
-      setPlaylists([]);
+    setIsReconnecting(true);
+    try {
+      const connected = await googleDriveService.isConnected();
+      setIsReconnecting(false);
+      if (connected) {
+        setConnected(true);
+        try {
+          const musicPlaylists = await googleDriveService.autoScanMusicFolder();
+          if (musicPlaylists.length > 0)
+            setPlaylists([
+              ...playlists.filter(p => !p.id.startsWith('gdrive-')),
+              ...musicPlaylists,
+            ]);
+        } catch (e) {
+          console.warn('[Home] Refresh scan failed:', e);
+        } finally {
+          setLastScan(new Date());
+        }
+      } else {
+        setConnected(false);
+        setPlaylists([]);
+      }
+    } catch {
+      setIsReconnecting(false);
     }
     setRefreshing(false);
   }, [playlists, setPlaylists]);
@@ -567,9 +591,9 @@ export const HomeScreen: React.FC = () => {
           colors={colors}
           isDark={isDark}
           lastScan={lastScan}
-          isScanning={isScanning}
+          isScanning={isScanning || isReconnecting}
           scanProgress={scanProgress}
-          scanStatus={scanStatus}
+          scanStatus={isReconnecting ? 'Refreshing session…' : scanStatus}
         />
 
         {/* Playlists */}
@@ -579,9 +603,12 @@ export const HomeScreen: React.FC = () => {
           colors={colors}
           rightElement={
             <View style={styles.statusBadge}>
-              <View style={[styles.statusDot, { backgroundColor: isGoogleDriveConnected ? '#34C759' : '#FF3B30' }]} />
+              <View style={[
+                styles.statusDot,
+                { backgroundColor: isReconnecting ? '#FF9500' : isGoogleDriveConnected ? '#34C759' : '#FF3B30' }
+              ]} />
               <Text style={[styles.statusText, { color: colors.textSecondary }]}>
-                {isGoogleDriveConnected ? 'Online' : 'No Drive'}
+                {isReconnecting ? 'Reconnecting' : isGoogleDriveConnected ? 'Online' : 'No Drive'}
               </Text>
             </View>
           }
