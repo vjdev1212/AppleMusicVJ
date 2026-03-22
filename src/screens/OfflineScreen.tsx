@@ -25,7 +25,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { BlurView } from 'expo-blur';
 
 import { useTheme, useAudioPlayer } from '../hooks';
-import { usePlaylistStore } from '../store';
+import { usePlaylistStore } from '../store/store_index';
 import { MiniPlayer, SongItem } from '../components';
 import { Spacing, FontSize, BorderRadius } from '../constants/theme';
 import { googleDriveService } from '../services/googleDriveService';

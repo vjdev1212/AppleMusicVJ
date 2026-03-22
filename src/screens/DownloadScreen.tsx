@@ -14,7 +14,7 @@ import { useNavigation } from '@react-navigation/native';
 import * as FileSystem from 'expo-file-system/legacy';
 
 import { useTheme } from '../hooks';
-import { useSettingsStore, useGoogleDriveStore } from '../store';
+import { useSettingsStore, useGoogleDriveStore } from '../store/store_index';
 import { googleDriveService } from '../services/googleDriveService';
 import { audioService } from '../services/audioService';
 import { Spacing, BorderRadius, FontSize } from '../constants/theme';
