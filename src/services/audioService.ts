@@ -158,7 +158,7 @@ class AudioService {
 
       this.player = createAudioPlayer(source, {
         keepAudioSessionActive: true,
-        updateInterval: 250, // fast first tick so duration arrives quickly
+        updateInterval: 500,
       });
 
       this.player.addListener(

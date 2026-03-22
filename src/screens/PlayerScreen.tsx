@@ -8,7 +8,6 @@ import {
   Dimensions,
   Modal,
   Pressable,
-  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -83,18 +82,12 @@ const ProgressSection: React.FC = memo(() => {
 });
 
 // ─── Play/Pause Button ────────────────────────────────────────────────────────
-// Completely isolated — only re-renders when isPlaying or duration changes.
-// Shows spinner ONLY when isPlaying=true but duration is still 0 (genuine buffer).
-// For offline/local songs duration arrives almost instantly so spinner never shows.
+// Isolated component — only re-renders when isPlaying changes.
+// No spinner — just clean instant play/pause icon swap.
 const PlayPauseButton: React.FC<{
   onPress: () => void;
 }> = memo(({ onPress }) => {
   const isPlaying = usePlayerStore(s => s.isPlaying);
-  const duration = usePlayerStore(s => s.duration);
-
-  // Only show spinner when actively loading: playing=true but no duration yet
-  const isBuffering = isPlaying && duration === 0;
-  const showPause = isPlaying && !isBuffering;
 
   return (
     <TouchableOpacity
@@ -102,16 +95,12 @@ const PlayPauseButton: React.FC<{
       activeOpacity={0.8}
       style={styles.playBtn}
     >
-      {isBuffering ? (
-        <ActivityIndicator size="large" color="#000" />
-      ) : (
-        <Ionicons
-          name={showPause ? 'pause' : 'play'}
-          size={46}
-          color="#000"
-          style={showPause ? undefined : { marginLeft: 4 }}
-        />
-      )}
+      <Ionicons
+        name={isPlaying ? 'pause' : 'play'}
+        size={46}
+        color="#000"
+        style={isPlaying ? undefined : { marginLeft: 4 }}
+      />
     </TouchableOpacity>
   );
 });
