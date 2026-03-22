@@ -25,8 +25,8 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { useTheme, useAudioPlayer } from '../hooks';
-import { usePlaylistStore, useSettingsStore, useGoogleDriveStore, useSyncStore } from '../store/store_index';
-import { MiniPlayer, SongItem } from '../components';
+import { usePlaylistStore, useSettingsStore, useGoogleDriveStore, useSyncStore } from '../store';
+import { SongItem } from '../components';
 import { Spacing, BorderRadius, FontSize } from '../constants/theme';
 import { googleDriveService } from '../services/googleDriveService';
 import { playlistSyncService, DriveFolder } from '../services/playlistSyncService';
@@ -733,13 +733,6 @@ export const HomeScreen: React.FC = () => {
           </>
         )}
       </ScrollView>
-
-      {/* Mini Player */}
-      {currentSong && (
-        <View style={[styles.miniPlayerWrap, { bottom: 60 + insets.bottom }]}>
-          <MiniPlayer onPress={() => navigation.navigate('Player')} />
-        </View>
-      )}
     </View>
   );
 };
@@ -848,8 +841,5 @@ const styles = StyleSheet.create({
   emptyIconCircle: { width: 100, height: 100, borderRadius: 50, justifyContent: 'center', alignItems: 'center', marginBottom: 4 },
   emptyText:    { fontSize: FontSize.lg, fontWeight: '700' },
   emptySubtext: { fontSize: FontSize.md, textAlign: 'center', lineHeight: 22, opacity: 0.8 },
-
-  // Mini player
-  miniPlayerWrap: { position: 'absolute', left: 0, right: 0 },
   scrollView:     { flex: 1 },
 });

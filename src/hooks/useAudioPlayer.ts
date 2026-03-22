@@ -1,6 +1,6 @@
 import { useEffect, useCallback } from 'react';
 import { audioService } from '../services/audioService';
-import { usePlayerStore, usePlaylistStore } from '../store/store_index';
+import { usePlayerStore, usePlaylistStore } from '../store';
 import { Song } from '../types';
 
 export const useAudioPlayer = () => {

@@ -4,7 +4,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { Song } from '../types';
 import { googleDriveService } from './googleDriveService';
 import { youtubeService } from './youtubeService';
-import { usePlayerStore, useSettingsStore } from '../store/store_index';
+import { usePlayerStore, useSettingsStore } from '../store';
 
 const CACHE_DIR = `${FileSystem.cacheDirectory}music-cache/`;
 

@@ -19,7 +19,7 @@ import { useTheme, useAudioPlayer } from '../hooks';
 import { SongItem, MiniPlayer } from '../components';
 import { Spacing, BorderRadius, FontSize } from '../constants/theme';
 import { Playlist, Song } from '../types';
-import { usePlayerStore } from '../store/store_index';
+import { usePlayerStore } from '../store';
 import { googleDriveService } from '../services/googleDriveService';
 
 type RootStackParamList = {

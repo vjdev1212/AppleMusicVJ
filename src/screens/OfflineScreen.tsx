@@ -25,8 +25,8 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { BlurView } from 'expo-blur';
 
 import { useTheme, useAudioPlayer } from '../hooks';
-import { usePlaylistStore } from '../store/store_index';
-import { MiniPlayer, SongItem } from '../components';
+import { usePlaylistStore } from '../store';
+import { SongItem } from '../components';
 import { Spacing, FontSize, BorderRadius } from '../constants/theme';
 import { googleDriveService } from '../services/googleDriveService';
 import { Playlist, Song } from '../types';
@@ -862,13 +862,6 @@ export const OfflineScreen: React.FC = () => {
           </LinearGradient>
         </Animated.View>
       )}
-
-      {/* Mini Player */}
-      {currentSong && (
-        <View style={[styles.miniPlayerWrap, { bottom: 60 + insets.bottom }]}>
-          <MiniPlayer onPress={() => navigation.navigate('Player')} />
-        </View>
-      )}
     </View>
   );
 };
@@ -1137,7 +1130,4 @@ const styles = StyleSheet.create({
 
   // Songs
   songsContent: { paddingHorizontal: Spacing.md, paddingBottom: 160 },
-
-  // Mini player
-  miniPlayerWrap: { position: 'absolute', left: 0, right: 0 },
 });

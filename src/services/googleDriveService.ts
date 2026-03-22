@@ -4,7 +4,7 @@ import * as SecureStore from 'expo-secure-store';
 import { Playlist, Song } from '../types';
 import { parseBuffer } from 'music-metadata-browser';
 import * as FileSystem from 'expo-file-system/legacy';
-import { useGoogleDriveStore, useSettingsStore, usePlaylistStore } from '../store/store_index';
+import { useGoogleDriveStore, useSettingsStore, usePlaylistStore } from '../store';
 import { Buffer } from 'buffer';
 
 WebBrowser.maybeCompleteAuthSession();

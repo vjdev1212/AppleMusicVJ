@@ -23,7 +23,7 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { useTheme, useAudioPlayer } from '../hooks';
-import { usePlaylistStore } from '../store/store_index';
+import { usePlaylistStore } from '../store';
 import { SongItem } from '../components';
 import { Spacing, BorderRadius, FontSize } from '../constants/theme';
 import { Playlist, Song } from '../types';

@@ -10,7 +10,7 @@ import Slider from '@react-native-community/slider';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { useTheme } from '../hooks';
-import { usePlayerStore } from '../store/store_index';
+import { usePlayerStore } from '../store';
 import { audioService } from '../services/audioService';
 import { Spacing, FontSize } from '../constants/theme';
 
