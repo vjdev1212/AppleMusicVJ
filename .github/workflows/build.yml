@@ -32,35 +32,56 @@ jobs:
         run: npm ci
 
       - name: Build APK with EAS
-        run: eas build --platform android --profile production --non-interactive
+        run: eas build --platform android --profile preview --non-interactive
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Download APK artifact
+      - name: Wait for build to complete
         run: |
-          # Wait for build to complete and get the APK URL
+          echo "Waiting for build to complete..."
+          sleep 60
+          
+          # Get the latest build ID
           BUILD_ID=$(eas build:list --platform android --limit 1 --json | jq -r '.[0].id')
           echo "Build ID: $BUILD_ID"
           
-          # Wait for build to finish
-          while true; do
+          # Poll for build status
+          for i in {1..60}; do
             STATUS=$(eas build:view $BUILD_ID --json | jq -r '.status')
             echo "Build status: $STATUS"
+            
             if [ "$STATUS" = "finished" ]; then
+              echo "Build completed successfully!"
               break
             elif [ "$STATUS" = "errored" ]; then
               echo "Build failed!"
               exit 1
             fi
+            
             sleep 30
           done
+
+      - name: Download APK
+        run: |
+          # Get the latest build ID
+          BUILD_ID=$(eas build:list --platform android --limit 1 --json | jq -r '.[0].id')
+          echo "Downloading APK for build: $BUILD_ID"
           
           # Get download URL
           APK_URL=$(eas build:view $BUILD_ID --json | jq -r '.artifacts.buildUrl')
           echo "APK URL: $APK_URL"
           
           # Download APK
-          wget -O app-release.apk "$APK_URL"
+          wget -O app-release.apk "$APK_URL" || curl -L -o app-release.apk "$APK_URL"
+          
+          # Verify download
+          if [ -f "app-release.apk" ]; then
+            echo "APK downloaded successfully!"
+            ls -lh app-release.apk
+          else
+            echo "Failed to download APK"
+            exit 1
+          fi
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
