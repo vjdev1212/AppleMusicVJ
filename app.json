@@ -20,7 +20,6 @@
       "bundleIdentifier": "com.applemusicplayer.app",
       "infoPlist": {
         "UIBackgroundModes": [
-          "audio",
           "audio"
         ],
         "NSAppleMusicUsageDescription": "This app needs access to your Apple Music library."
@@ -31,13 +30,8 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#FF2D55"
       },
-      "package": "com.applemusicplayer.app",
+      "package": "com.vignesh.applemusicplayer",
       "permissions": [
-        "android.permission.INTERNET",
-        "android.permission.ACCESS_NETWORK_STATE",
-        "android.permission.FOREGROUND_SERVICE",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.MODIFY_AUDIO_SETTINGS",
         "android.permission.INTERNET",
         "android.permission.ACCESS_NETWORK_STATE",
         "android.permission.FOREGROUND_SERVICE",
