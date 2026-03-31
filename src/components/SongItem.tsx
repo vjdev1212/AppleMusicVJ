@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../hooks';
 import { Spacing, BorderRadius, FontSize } from '../constants/theme';
@@ -32,6 +33,10 @@ export const SongItem: React.FC<SongItemProps> = ({
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
   };
 
+  const displayTitle  = song.title?.trim()  || 'Unknown Title';
+  const displayArtist = song.artist?.trim() || 'Unknown Artist';
+  const hasArtwork    = !!song.artwork && !song.artwork.includes('premium_music_note');
+
   return (
     <TouchableOpacity
       style={[
@@ -53,16 +58,23 @@ export const SongItem: React.FC<SongItemProps> = ({
           { backgroundColor: colors.surfaceSecondary },
         ]}
       >
-        <Image
-          source={
-            song.artwork 
-              ? { uri: song.artwork } 
-              : require('../../assets/icon.png')
-          }
-          defaultSource={require('../../assets/icon.png')}
-          style={styles.artwork}
-          resizeMode="cover"
-        />
+        {hasArtwork ? (
+          <Image
+            source={{ uri: song.artwork }}
+            defaultSource={require('../../assets/icon.png')}
+            style={styles.artwork}
+            resizeMode="cover"
+          />
+        ) : (
+          <LinearGradient
+            colors={[colors.primary + '60', colors.primary + '15']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={[styles.artwork, styles.artworkPlaceholder]}
+          >
+            <Ionicons name="musical-notes" size={22} color={colors.primary} />
+          </LinearGradient>
+        )}
         {isPlaying && (
           <View style={styles.playingIndicator}>
             <Ionicons name="volume-high" size={16} color={colors.primary} />
@@ -78,10 +90,10 @@ export const SongItem: React.FC<SongItemProps> = ({
           ]}
           numberOfLines={1}
         >
-          {song.title}
+          {displayTitle}
         </Text>
         <Text style={[styles.artist, { color: colors.textSecondary }]} numberOfLines={1}>
-          {song.artist}
+          {displayArtist}
         </Text>
       </View>
 
@@ -123,6 +135,10 @@ const styles = StyleSheet.create({
     width: 50,
     height: 50,
     borderRadius: BorderRadius.sm,
+  },
+  artworkPlaceholder: {
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   playingIndicator: {
     position: 'absolute',

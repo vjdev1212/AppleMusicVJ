@@ -1,11 +1,11 @@
 import 'react-native-gesture-handler';
 import { Buffer } from 'buffer';
-import process from 'process';
 
 // Polyfills for music-metadata and other node-based libs
 global.Buffer = Buffer;
-global.process = process;
-if (!global.process.nextTick) {
+
+// ONLY polyfill nextTick if missing, do not touch process object itself
+if (global.process && !global.process.nextTick) {
   global.process.nextTick = (fn, ...args) => setImmediate(() => fn(...args));
 }
 

@@ -13,7 +13,6 @@ import {
 } from './screens';
 import { Playlist } from './types';
 import { TabNavigator } from './navigation/TabNavigator';
-import { MiniPlayer } from './components';
 import { useAudioPlayer } from './hooks';
 
 // Define navigation types
@@ -85,12 +84,7 @@ export default function AppMain() {
           />
         </Stack.Navigator>
       </NavigationContainer>
-      
-      {currentSong && currentRoute !== 'Player' && (
-        <View style={{ position: 'absolute', bottom: 60, left: 0, right: 0 }}>
-          <MiniPlayer onPress={handleMiniPlayerPress} />
-        </View>
-      )}
+
     </View>
   );
 }

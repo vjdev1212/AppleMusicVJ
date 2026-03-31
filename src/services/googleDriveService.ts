@@ -363,7 +363,12 @@ class GoogleDriveService {
    * Recursively scan a folder for audio files, processing sub-folders
    * PARALLEL_FOLDER_LIMIT at a time instead of one-by-one.
    */
-  async scanDrive(folderId: string, folderName: string): Promise<Playlist[]> {
+  async scanDrive(
+    folderId: string,
+    folderName: string,
+    onProgress?: (done: number, total: number, itemName?: string) => void,
+    _progressState?: { done: number; total: number }
+  ): Promise<Playlist[]> {
     const store = useGoogleDriveStore.getState();
 
     // ── 1. Fetch sub-folders and audio files simultaneously ──
@@ -385,14 +390,24 @@ class GoogleDriveService {
     ]);
 
     const folderData = await folderRes.json();
-    const filesData = await filesRes.json();
+    const filesData  = await filesRes.json();
 
     if (folderData.error) throw new Error(folderData.error.message);
-    if (filesData.error) throw new Error(filesData.error.message);
+    if (filesData.error)  throw new Error(filesData.error.message);
 
     const subFolders: { id: string; name: string }[] = folderData.files || [];
     const audioFiles: { id: string; name: string; size: string; mimeType: string }[] =
       filesData.files || [];
+
+    // Initialise shared progress counter on the first call
+    if (!_progressState && onProgress) {
+      // We don't know the total yet; we'll increment total as we discover files
+      _progressState = { done: 0, total: audioFiles.length };
+    }
+    if (_progressState) {
+      // Add newly discovered audio files to total
+      _progressState.total += audioFiles.length;
+    }
 
     let playlists: Playlist[] = [];
 
@@ -407,7 +422,7 @@ class GoogleDriveService {
         PARALLEL_FOLDER_LIMIT,
         async (sub: { id: string; name: string }) => {
           try {
-            return await this.scanDrive(sub.id, sub.name);
+            return await this.scanDrive(sub.id, sub.name, onProgress, _progressState);
           } catch (err) {
             console.warn(`[Scan] Failed scanning sub-folder "${sub.name}":`, err);
             return [];
@@ -422,15 +437,16 @@ class GoogleDriveService {
     if (audioFiles.length > 0) {
       store.setScanStatus(`Processing ${audioFiles.length} songs in "${folderName}"...`);
 
-      // Fetch metadata for all songs in parallel (batched to avoid rate limits)
-      const songs = await parallelBatch<Song>(
-        audioFiles,
-        PARALLEL_FOLDER_LIMIT,
-        async (file: { id: string; name: string; size: string; mimeType: string }) =>
-          this.buildSong(file)
-      );
+      const songs: Song[] = [];
+      for (const file of audioFiles) {
+        const song = await this.buildSong(file);
+        songs.push(song);
+        if (_progressState) {
+          _progressState.done++;
+          onProgress?.(_progressState.done, _progressState.total, file.name);
+        }
+      }
 
-      // Filter out any songs that failed to build
       const validSongs = songs.filter(Boolean);
 
       if (validSongs.length > 0) {
@@ -444,10 +460,6 @@ class GoogleDriveService {
           artwork: validSongs[0]?.artwork,
         });
       }
-
-      store.setScanProgress(
-        Math.min((store as any).scanProgress + 1 / Math.max(audioFiles.length, 1), 1)
-      );
     }
 
     return playlists;
@@ -461,10 +473,12 @@ class GoogleDriveService {
     size?: string;
     mimeType?: string;
   }): Promise<Song> {
-    let title = file.name.replace(/\.[^/.]+$/, '');
-    let artist = 'Unknown Artist';
-    let album = '';
+    // Derive title from filename; guarantee it's never an empty string
+    let title  = (file.name.replace(/\.[^/.]+$/, '').trim()) || file.name || file.id;
+    let artist   = 'Unknown Artist';
+    let album    = '';
     let duration = 0;
+    const streamingUrl = this.getStreamingUrl(file.id);
     let artwork =
       'https://raw.githubusercontent.com/viki28593/assets/main/premium_music_note.png';
 
@@ -522,14 +536,14 @@ class GoogleDriveService {
     }
 
     return {
-      id: file.id,
-      title,
-      artist,
+      id:       file.id,
+      title:    title  || file.name || file.id,   // triple-fallback: never empty
+      artist:   artist || 'Unknown Artist',
       album,
       duration,
-      url: this.getStreamingUrl(file.id),
-      source: 'google-drive',
-      fileId: file.id,
+      url:      streamingUrl,                      // always the Drive streaming URL
+      source:   'google-drive',
+      fileId:   file.id,
       artwork,
     };
   }

@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Image, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../hooks';
 import { Spacing, BorderRadius, FontSize } from '../constants/theme';
@@ -8,12 +8,14 @@ import { Playlist } from '../types';
 interface PlaylistCardProps {
   playlist: Playlist;
   onPress: () => void;
+  onDownload?: (quality: 'high' | 'medium' | 'low') => void;
   size?: 'small' | 'medium' | 'large';
 }
 
 export const PlaylistCard: React.FC<PlaylistCardProps> = ({
   playlist,
   onPress,
+  onDownload,
   size = 'medium',
 }) => {
   const { colors } = useTheme();
@@ -83,7 +85,19 @@ export const PlaylistCard: React.FC<PlaylistCardProps> = ({
         <TouchableOpacity 
           style={styles.downloadButton}
           onPress={() => {
-            // Handle download press - could navigate to download screen or start download
+            if (onDownload) {
+              Alert.alert(
+                'Download Quality',
+                'Select the audio quality for your offline songs:',
+                [
+                  { text: 'High (320kbps)', onPress: () => onDownload('high') },
+                  { text: 'Medium (128kbps)', onPress: () => onDownload('medium') },
+                  { text: 'Low (64kbps)', onPress: () => onDownload('low') },
+                  { text: 'Cancel', style: 'cancel' }
+                ],
+                { cancelable: true }
+              );
+            }
           }}
         >
           <Ionicons name="download-outline" size={20} color="#fff" />

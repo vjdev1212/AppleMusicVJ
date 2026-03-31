@@ -102,26 +102,33 @@ class AudioService {
     }
 
     if (song.source === 'google-drive') {
-      // Check local file first
+      // 1. Check local file first (offline download)
       if (song.localUri) {
         try {
           const info = await FileSystem.getInfoAsync(song.localUri);
           if (info.exists) return { uri: song.localUri };
         } catch {}
       }
-      // Check JIT cache
+      // 2. Check JIT cache
       const cached = await this._getCached(song.id);
       if (cached) return { uri: cached };
 
-      // Stream with token
+      // 3. Stream from Drive — embed token as query param so iOS AVPlayer picks it up
+      //    (iOS ignores custom headers on direct media URLs in AVFoundation)
+      if (!url) throw new Error(`[Audio] No URL for song: ${song.title}`);
       const token = await googleDriveService.getAccessToken();
-      if (!token) throw new Error('No Google Drive token');
-      // Background cache
+      if (!token) throw new Error('No Google Drive token — please reconnect');
+      // Append token to URL; avoids the custom-header limitation on iOS
+      const authedUri = url.includes('?')
+        ? `${url}&access_token=${encodeURIComponent(token)}`
+        : `${url}?access_token=${encodeURIComponent(token)}`;
+      // Also background-cache for next play
       this._cacheInBg(song, token);
-      return { uri: url, headers: { Authorization: `Bearer ${token}` } };
+      return { uri: authedUri };
     }
 
     // offline / streaming-url / default
+    if (!url) throw new Error(`[Audio] No URL for song: ${song.title}`);
     return { uri: url };
   }
 

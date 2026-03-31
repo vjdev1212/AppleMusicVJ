@@ -67,9 +67,12 @@ class PlaylistSyncService {
   }
 
   // ─── Fetch songs for a specific folder and return as Playlist ──────────────
-  async fetchPlaylistForFolder(folder: DriveFolder): Promise<Playlist[]> {
+  async fetchPlaylistForFolder(
+    folder: DriveFolder,
+    onProgress?: (done: number, total: number, itemName?: string) => void
+  ): Promise<Playlist[]> {
     try {
-      return await googleDriveService.scanDrive(folder.id, folder.name);
+      return await googleDriveService.scanDrive(folder.id, folder.name, onProgress);
     } catch (e) {
       console.warn(`[Sync] fetchPlaylistForFolder error for ${folder.name}:`, e);
       return [];

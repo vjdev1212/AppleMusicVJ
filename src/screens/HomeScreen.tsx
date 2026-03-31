@@ -426,10 +426,10 @@ export const HomeScreen: React.FC = () => {
   // Sync store
   const {
     availableFolders, selectedFolderIds, syncedPlaylists,
-    isFetchingFolders, isSyncingFolder, syncProgress,
+    isFetchingFolders, isSyncingFolder, syncProgress, syncStatusText,
     setAvailableFolders, setSelectedFolderIds, setSyncedPlaylists,
     addSyncedPlaylist, addSelectedFolderId,
-    setIsFetchingFolders, setIsSyncingFolder, setSyncProgress,
+    setIsFetchingFolders, setIsSyncingFolder, setSyncProgress, setSyncStatusText,
   } = useSyncStore();
 
   const [refreshing, setRefreshing]       = useState(false);
@@ -503,7 +503,13 @@ export const HomeScreen: React.FC = () => {
     setIsSyncingFolder(folder.id);
     setSyncProgress(0);
     try {
-      const playlists = await playlistSyncService.fetchPlaylistForFolder(folder);
+      const playlists = await playlistSyncService.fetchPlaylistForFolder(
+        folder,
+        (done, total, itemName) => {
+          setSyncProgress(total > 0 ? done / total : 0);
+          if (itemName) setSyncStatusText(`Syncing: ${itemName}`);
+        }
+      );
       playlists.forEach(p => addSyncedPlaylist(p));
       const all = useSyncStore.getState().syncedPlaylists;
       await playlistSyncService.saveCachedPlaylists(all);
@@ -517,18 +523,29 @@ export const HomeScreen: React.FC = () => {
 
   const syncAllFolders = async (folders: DriveFolder[]) => {
     setIsSyncingFolder('all');
-    let done = 0;
+    setSyncProgress(0);
+    let globalDone   = 0;
+    let globalTotal  = 0;
     for (const folder of folders) {
       try {
-        const playlists = await playlistSyncService.fetchPlaylistForFolder(folder);
+        const playlists = await playlistSyncService.fetchPlaylistForFolder(
+          folder,
+          (done, total, itemName) => {
+            // total may grow as subfolders are discovered — accumulate
+            globalTotal = Math.max(globalTotal, globalDone + total);
+            globalDone  = (globalTotal - total) + done;
+            setSyncProgress(globalTotal > 0 ? globalDone / globalTotal : 0);
+            if (itemName) setSyncStatusText(`Syncing: ${itemName}`);
+          }
+        );
         playlists.forEach(p => addSyncedPlaylist(p));
       } catch {}
-      done++;
-      setSyncProgress(done / folders.length);
+      globalDone = (globalDone < globalTotal) ? globalTotal : globalDone;
     }
     const all = useSyncStore.getState().syncedPlaylists;
     await playlistSyncService.saveCachedPlaylists(all);
     setIsSyncingFolder(null);
+    setSyncProgress(1);
   };
 
   // ─── Pull to refresh ───────────────────────────────────────────────────────
@@ -614,7 +631,7 @@ export const HomeScreen: React.FC = () => {
           scanProgress={isSyncing ? syncProgress : scanProgress}
           scanStatus={
             isReconnecting ? 'Refreshing session…'
-            : isSyncing     ? `Syncing ${isSyncingFolder === 'all' ? 'all playlists' : 'playlist'}…`
+            : isSyncing     ? (syncStatusText || `Syncing ${isSyncingFolder === 'all' ? 'all playlists' : 'playlist'}…`)
             : scanStatus
           }
         />

@@ -76,6 +76,8 @@ export interface SyncStore {
   isFetchingFolders:   boolean;
   isSyncingFolder:     string | null;  // folder ID currently syncing, null = idle
   syncProgress:        number;         // 0–1
+  syncStatusText:      string;         // e.g. Syncing: Song Name
+
 
   setAvailableFolders:  (folders: DriveFolder[]) => void;
   setSelectedFolderIds: (ids: string[]) => void;
@@ -85,6 +87,7 @@ export interface SyncStore {
   setIsFetchingFolders: (v: boolean) => void;
   setIsSyncingFolder:   (folderId: string | null) => void;
   setSyncProgress:      (v: number) => void;
+  setSyncStatusText:    (v: string) => void;
 }
 
 // ─── Store implementations ───────────────────────────────────────────────────
@@ -241,6 +244,7 @@ export const useSyncStore = create<SyncStore>()((set) => ({
   isFetchingFolders: false,
   isSyncingFolder:   null,
   syncProgress:      0,
+  syncStatusText:    '',
 
   setAvailableFolders:  (folders)   => set({ availableFolders: folders }),
   setSelectedFolderIds: (ids)       => set({ selectedFolderIds: ids }),
@@ -262,4 +266,5 @@ export const useSyncStore = create<SyncStore>()((set) => ({
   setIsFetchingFolders: (v) => set({ isFetchingFolders: v }),
   setIsSyncingFolder:   (v) => set({ isSyncingFolder: v }),
   setSyncProgress:      (v) => set({ syncProgress: v }),
+  setSyncStatusText:    (v) => set({ syncStatusText: v }),
 }));

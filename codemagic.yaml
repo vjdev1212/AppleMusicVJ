@@ -21,95 +21,103 @@ workflows:
           if [ -f "app.json" ]; then
             APP_VERSION=$(node -p "JSON.parse(require('fs').readFileSync('app.json', 'utf8')).expo.version")
             APP_NAME=$(node -p "JSON.parse(require('fs').readFileSync('app.json', 'utf8')).expo.name.replace(/[^a-zA-Z0-9]/g, '')")
-            echo "📱 App Name: $APP_NAME"
-            echo "📋 Version: $APP_VERSION"
+            echo "App Name: $APP_NAME"
+            echo "Version: $APP_VERSION"
             echo "APP_VERSION=$APP_VERSION" >> $CM_ENV
             echo "APP_NAME=$APP_NAME" >> $CM_ENV
           else
-            echo "⚠️  app.json not found, using default values"
+            echo "app.json not found, using default values"
             echo "APP_VERSION=1.0.0" >> $CM_ENV
-            echo "APP_NAME=Strmify" >> $CM_ENV
+            echo "APP_NAME=AppleMusicPlayer" >> $CM_ENV
           fi
 
-      - name: Fix expo-updates
+      - name: Fix expo-updates build script
         script: |
           mkdir -p node_modules/expo-updates/scripts
-          cat > node_modules/expo-updates/scripts/create-manifest-ios.sh << 'EOF2'
+          cat > node_modules/expo-updates/scripts/create-manifest-ios.sh << 'SCRIPTEOF'
           #!/bin/bash
           mkdir -p "${DERIVED_FILE_DIR}" 2>/dev/null || true
           touch "${DERIVED_FILE_DIR}/EXUpdates.generated.m" 2>/dev/null || true
           exit 0
-          EOF2
+          SCRIPTEOF
           chmod +x node_modules/expo-updates/scripts/create-manifest-ios.sh
 
-      - name: Clean and generate iOS project
+      - name: Prebuild iOS project
         script: |
           rm -rf ios android
           npx expo prebuild --clean --platform ios
 
-      - name: Install iOS dependencies
+      - name: Install CocoaPods
         script: |
           cd ios
           pod install --repo-update
 
-      - name: Download Metal Toolchain
-        script: |
-          echo "⬇️ Downloading Metal Toolchain for KSPlayer shader compilation..."
-          xcodebuild -downloadComponent MetalToolchain
-          echo "✅ Metal Toolchain ready"
-
-      - name: Build with Xcode (unsigned)
+      - name: Archive with Xcode
         script: |
           cd ios
           WORKSPACE=$(find . -name "*.xcworkspace" -maxdepth 1 | head -1)
           if [ -z "$WORKSPACE" ]; then
-            echo "❌ No .xcworkspace found"
+            echo "No .xcworkspace found"
             exit 1
           fi
-
           SCHEME_NAME=$(basename "$WORKSPACE" .xcworkspace)
-          echo "📱 Building scheme: $SCHEME_NAME"
+          echo "Building scheme: $SCHEME_NAME"
 
-          xcodebuild -workspace "$WORKSPACE" \
+          mkdir -p build
+
+          xcodebuild \
+            -workspace "$WORKSPACE" \
             -scheme "$SCHEME_NAME" \
             -configuration Release \
-            -destination generic/platform=iOS \
+            -destination "generic/platform=iOS" \
             -archivePath "build/$SCHEME_NAME.xcarchive" \
             archive \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            DEVELOPMENT_TEAM="" \
+            CODE_SIGN_IDENTITY="Apple Development" \
+            CODE_SIGNING_REQUIRED=YES \
+            CODE_SIGNING_ALLOWED=YES \
+            DEVELOPMENT_TEAM="${APPLE_TEAM_ID:-}" \
             SWIFT_VERSION=5.0
 
-          mkdir -p "build/Payload"
-          cp -r "build/$SCHEME_NAME.xcarchive/Products/Applications/"*.app "build/Payload/"
-
-          APP_BUNDLE=$(ls "build/Payload/" | head -1)
-          BASE_NAME="${APP_BUNDLE%.app}"
-          echo "📱 App bundle: $APP_BUNDLE"
-
+      - name: Export IPA
+        script: |
+          cd ios
+          WORKSPACE=$(find . -name "*.xcworkspace" -maxdepth 1 | head -1)
+          SCHEME_NAME=$(basename "$WORKSPACE" .xcworkspace)
+          ARCHIVE_PATH="build/$SCHEME_NAME.xcarchive"
           IPA_NAME="${APP_NAME}_v${APP_VERSION}"
-          echo "📦 IPA name: $IPA_NAME"
 
-          EXECUTABLE=$(plutil -extract CFBundleExecutable raw "build/Payload/$APP_BUNDLE/Info.plist" 2>/dev/null || echo "$BASE_NAME")
-          if [ ! -f "build/Payload/$APP_BUNDLE/$EXECUTABLE" ]; then
-            echo "⚠️  Warning: Executable $EXECUTABLE not found"
-          else
-            echo "✅ Executable found: $EXECUTABLE"
-          fi
+          cat > build/ExportOptions.plist << PLISTEOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>development</string>
+              <key>compileBitcode</key>
+              <false/>
+              <key>stripSwiftSymbols</key>
+              <true/>
+              <key>thinning</key>
+              <string><none></string>
+          </dict>
+          </plist>
+          PLISTEOF
 
-          cd build
-          zip -r "$IPA_NAME.ipa" Payload/
+          xcodebuild -exportArchive \
+            -archivePath "$ARCHIVE_PATH" \
+            -exportPath "build/export" \
+            -exportOptionsPlist build/ExportOptions.plist
 
-          if [ -f "$IPA_NAME.ipa" ]; then
-            echo "✅ IPA created successfully: $IPA_NAME.ipa"
-            echo "📊 IPA size: $(ls -lh "$IPA_NAME.ipa" | awk '{print $5}')"
-            ln -sf "$IPA_NAME.ipa" "latest.ipa"
-          else
-            echo "❌ Failed to create IPA"
+          EXPORTED_IPA=$(find build/export -name "*.ipa" | head -1)
+          if [ -z "$EXPORTED_IPA" ]; then
+            echo "No IPA found in export directory"
+            ls -la build/export/ || true
             exit 1
           fi
+
+          cp "$EXPORTED_IPA" "build/${IPA_NAME}.ipa"
+          IPA_SIZE=$(ls -lh "build/${IPA_NAME}.ipa" | awk '{print $5}')
+          echo "IPA created: build/${IPA_NAME}.ipa (${IPA_SIZE})"
 
     artifacts:
       - ios/build/*.ipa
@@ -134,73 +142,90 @@ workflows:
           if [ -f "app.json" ]; then
             APP_VERSION=$(node -p "JSON.parse(require('fs').readFileSync('app.json', 'utf8')).expo.version")
             APP_NAME=$(node -p "JSON.parse(require('fs').readFileSync('app.json', 'utf8')).expo.name.replace(/[^a-zA-Z0-9]/g, '')")
-            echo "📱 App Name: $APP_NAME"
-            echo "📋 Version: $APP_VERSION"
+            echo "App Name: $APP_NAME"
+            echo "Version: $APP_VERSION"
             echo "APP_VERSION=$APP_VERSION" >> $CM_ENV
             echo "APP_NAME=$APP_NAME" >> $CM_ENV
           else
-            echo "⚠️  app.json not found, using defaults"
+            echo "app.json not found, using defaults"
             echo "APP_VERSION=1.0.0" >> $CM_ENV
-            echo "APP_NAME=Strmify" >> $CM_ENV
+            echo "APP_NAME=AppleMusicPlayer" >> $CM_ENV
           fi
 
-      - name: Clean and generate iOS project
+      - name: Prebuild iOS project
         script: |
           rm -rf ios android
           npx expo prebuild --clean --platform ios
 
-      - name: Install iOS dependencies
+      - name: Install CocoaPods
         script: |
           cd ios
           pod install --repo-update
 
-      - name: Download Metal Toolchain
-        script: |
-          echo "⬇️ Downloading Metal Toolchain for KSPlayer shader compilation..."
-          xcodebuild -downloadComponent MetalToolchain
-          echo "✅ Metal Toolchain ready"
-
-      - name: Build with Xcode (Debug, unsigned)
+      - name: Archive with Xcode (Debug)
         script: |
           cd ios
           WORKSPACE=$(find . -name "*.xcworkspace" -maxdepth 1 | head -1)
           SCHEME_NAME=$(basename "$WORKSPACE" .xcworkspace)
+          echo "Building development scheme: $SCHEME_NAME"
 
-          echo "📱 Building development scheme: $SCHEME_NAME"
+          mkdir -p build
 
-          xcodebuild -workspace "$WORKSPACE" \
+          xcodebuild \
+            -workspace "$WORKSPACE" \
             -scheme "$SCHEME_NAME" \
             -configuration Debug \
-            -destination generic/platform=iOS \
+            -destination "generic/platform=iOS" \
             -archivePath "build/$SCHEME_NAME-dev.xcarchive" \
             archive \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            DEVELOPMENT_TEAM="" \
+            CODE_SIGN_IDENTITY="Apple Development" \
+            CODE_SIGNING_REQUIRED=YES \
+            CODE_SIGNING_ALLOWED=YES \
+            DEVELOPMENT_TEAM="${APPLE_TEAM_ID:-}" \
             SWIFT_VERSION=5.0
 
-          mkdir -p build/Payload
-          cp -r build/$SCHEME_NAME-dev.xcarchive/Products/Applications/*.app build/Payload/
-
-          APP_BUNDLE=$(ls build/Payload/ | head -1)
+      - name: Export Development IPA
+        script: |
+          cd ios
+          WORKSPACE=$(find . -name "*.xcworkspace" -maxdepth 1 | head -1)
+          SCHEME_NAME=$(basename "$WORKSPACE" .xcworkspace)
+          ARCHIVE_PATH="build/$SCHEME_NAME-dev.xcarchive"
           IPA_NAME="${APP_NAME}_Dev_v${APP_VERSION}"
 
-          cd build
-          zip -r "$IPA_NAME.ipa" Payload/
+          cat > build/ExportOptions-Dev.plist << PLISTEOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>development</string>
+              <key>compileBitcode</key>
+              <false/>
+              <key>thinning</key>
+              <string><none></string>
+          </dict>
+          </plist>
+          PLISTEOF
 
-          if [ -f "$IPA_NAME.ipa" ]; then
-            echo "✅ Development IPA created: $IPA_NAME.ipa"
-            ln -sf "$IPA_NAME.ipa" "latest-dev.ipa"
-          else
-            echo "❌ Failed to create Development IPA"
+          xcodebuild -exportArchive \
+            -archivePath "$ARCHIVE_PATH" \
+            -exportPath "build/export-dev" \
+            -exportOptionsPlist build/ExportOptions-Dev.plist
+
+          EXPORTED_IPA=$(find build/export-dev -name "*.ipa" | head -1)
+          if [ -z "$EXPORTED_IPA" ]; then
+            echo "No IPA found in export directory"
             exit 1
           fi
+
+          cp "$EXPORTED_IPA" "build/${IPA_NAME}.ipa"
+          IPA_SIZE=$(ls -lh "build/${IPA_NAME}.ipa" | awk '{print $5}')
+          echo "Dev IPA created: build/${IPA_NAME}.ipa (${IPA_SIZE})"
 
     artifacts:
       - ios/build/*.ipa
 
-  # ── Android workflows ────────────────────────────────────────────────────────
+  # Android workflows (unchanged)
 
   strmify-android-build:
     name: Strmify Android Build
@@ -219,14 +244,14 @@ workflows:
           if [ -f "app.json" ]; then
             APP_VERSION=$(node -p "JSON.parse(require('fs').readFileSync('app.json', 'utf8')).expo.version")
             APP_NAME=$(node -p "JSON.parse(require('fs').readFileSync('app.json', 'utf8')).expo.name.replace(/[^a-zA-Z0-9]/g, '')")
-            echo "🤖 App Name: $APP_NAME"
-            echo "📋 Version: $APP_VERSION"
+            echo "App Name: $APP_NAME"
+            echo "Version: $APP_VERSION"
             echo "APP_VERSION=$APP_VERSION" >> $CM_ENV
             echo "APP_NAME=$APP_NAME" >> $CM_ENV
           else
-            echo "⚠️  app.json not found, using default values"
+            echo "app.json not found, using default values"
             echo "APP_VERSION=1.0.0" >> $CM_ENV
-            echo "APP_NAME=Strmify" >> $CM_ENV
+            echo "APP_NAME=AppleMusicPlayer" >> $CM_ENV
           fi
 
       - name: Clean and generate Android project
@@ -238,10 +263,10 @@ workflows:
       - name: Setup Android keystore
         script: |
           if [ -z "$KEYSTORE_FILE" ]; then
-            echo "⚠️  No keystore provided, building unsigned APK"
+            echo "No keystore provided, building unsigned APK"
             echo "UNSIGNED_BUILD=true" >> $CM_ENV
           else
-            echo "🔐 Keystore file detected"
+            echo "Keystore file detected"
             echo "UNSIGNED_BUILD=false" >> $CM_ENV
           fi
 
@@ -249,11 +274,11 @@ workflows:
         script: |
           cd android
           if [ "$UNSIGNED_BUILD" = "true" ]; then
-            echo "📦 Building unsigned release APK"
+            echo "Building unsigned release APK"
             ./gradlew assembleRelease -x configureCMakeRelease -Pandroid.overridePathCheck=true
             BUILD_OUTPUT="app/build/outputs/apk/release"
           else
-            echo "📦 Building signed release APK"
+            echo "Building signed release APK"
             ./gradlew assembleRelease \
               -x configureCMakeRelease \
               -Pandroid.overridePathCheck=true \
@@ -267,10 +292,10 @@ workflows:
           if [ -f "$BUILD_OUTPUT/app-release.apk" ]; then
             APK_NAME="${APP_NAME}_v${APP_VERSION}_release.apk"
             cp "$BUILD_OUTPUT/app-release.apk" "../$APK_NAME"
-            echo "✅ Release APK created: $APK_NAME"
+            echo "Release APK created: $APK_NAME"
             ln -sf "$APK_NAME" "../latest-release.apk"
           else
-            echo "❌ Failed to create release APK"
+            echo "Failed to create release APK"
             exit 1
           fi
 
@@ -292,10 +317,10 @@ workflows:
           if [ -f "app/build/outputs/bundle/release/app-release.aab" ]; then
             AAB_NAME="${APP_NAME}_v${APP_VERSION}_release.aab"
             cp "app/build/outputs/bundle/release/app-release.aab" "../$AAB_NAME"
-            echo "✅ App Bundle created: $AAB_NAME"
+            echo "App Bundle created: $AAB_NAME"
             ln -sf "$AAB_NAME" "../latest-release.aab"
           else
-            echo "❌ Failed to create App Bundle"
+            echo "Failed to create App Bundle"
             exit 1
           fi
 
@@ -320,14 +345,14 @@ workflows:
           if [ -f "app.json" ]; then
             APP_VERSION=$(node -p "JSON.parse(require('fs').readFileSync('app.json', 'utf8')).expo.version")
             APP_NAME=$(node -p "JSON.parse(require('fs').readFileSync('app.json', 'utf8')).expo.name.replace(/[^a-zA-Z0-9]/g, '')")
-            echo "🤖 App Name: $APP_NAME"
-            echo "📋 Version: $APP_VERSION"
+            echo "App Name: $APP_NAME"
+            echo "Version: $APP_VERSION"
             echo "APP_VERSION=$APP_VERSION" >> $CM_ENV
             echo "APP_NAME=$APP_NAME" >> $CM_ENV
           else
-            echo "⚠️  app.json not found, using default values"
+            echo "app.json not found, using default values"
             echo "APP_VERSION=1.0.0" >> $CM_ENV
-            echo "APP_NAME=Strmify" >> $CM_ENV
+            echo "APP_NAME=AppleMusicPlayer" >> $CM_ENV
           fi
 
       - name: Clean and generate Android project
@@ -346,10 +371,10 @@ workflows:
           if [ -f "$BUILD_OUTPUT/app-debug.apk" ]; then
             APK_NAME="${APP_NAME}_Dev_v${APP_VERSION}_debug.apk"
             cp "$BUILD_OUTPUT/app-debug.apk" "../$APK_NAME"
-            echo "✅ Debug APK created: $APK_NAME"
+            echo "Debug APK created: $APK_NAME"
             ln -sf "$APK_NAME" "../latest-debug.apk"
           else
-            echo "❌ Failed to create debug APK"
+            echo "Failed to create debug APK"
             exit 1
           fi
 
