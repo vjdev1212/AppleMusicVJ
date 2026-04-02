@@ -24,33 +24,21 @@ workflows:
       - name: Prebuild iOS project
         script: |
           rm -rf ios android
-
-          export RCT_NEW_ARCH_ENABLED=1
-
           npx expo prebuild --clean --platform ios
-
           echo "Prebuild complete"
 
-      - name: Patch Podfile for New Architecture
+      - name: Patch Podfile
         script: |
           cd ios
-
-          # Fix deployment target
           sed -i 's/platform :ios, .*/platform :ios, "15.0"/' Podfile
 
           cat > /tmp/patch.js << 'PATCHSCRIPT'
           const fs = require('fs');
           let podfile = fs.readFileSync('Podfile', 'utf8');
           const injection = [
-            '    ENV[\'RCT_NEW_ARCH_ENABLED\'] = \'1\'',
             '    installer.pods_project.targets.each do |target|',
             '      target.build_configurations.each do |config|',
             '        config.build_settings[\'IPHONEOS_DEPLOYMENT_TARGET\'] = \'15.0\'',
-            '        if target.name == \'react-native-safe-area-context\'',
-            '          config.build_settings[\'OTHER_CPLUSPLUSFLAGS\'] ||= []',
-            '          config.build_settings[\'OTHER_CPLUSPLUSFLAGS\'] += [\'-Wno-everything\']',
-            '          config.build_settings[\'GCC_TREAT_WARNINGS_AS_ERRORS\'] = \'NO\'',
-            '        end',
             '      end',
             '    end',
             ''
@@ -70,13 +58,21 @@ workflows:
         script: |
           cd ios
           rm -rf Pods Podfile.lock
-
-          export RCT_NEW_ARCH_ENABLED=1
-
-          echo "Installing CocoaPods..."
           pod install --repo-update
-
           echo "CocoaPods installed successfully"
+
+      - name: Disable code signing in Xcode project
+        script: |
+          PBXPROJ=$(find ios -name "*.pbxproj" | head -1)
+          echo "Patching: $PBXPROJ"
+
+          sed -i 's/CODE_SIGN_IDENTITY = "Apple Development";/CODE_SIGN_IDENTITY = "";/g' "$PBXPROJ"
+          sed -i 's/CODE_SIGN_IDENTITY = "iPhone Developer";/CODE_SIGN_IDENTITY = "";/g' "$PBXPROJ"
+          sed -i 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Manual;/g' "$PBXPROJ"
+          sed -i 's/DEVELOPMENT_TEAM = .*;//g' "$PBXPROJ"
+          sed -i 's/PROVISIONING_PROFILE_SPECIFIER = ".*";//g' "$PBXPROJ"
+
+          echo "Code signing disabled"
 
       - name: Build and create IPA
         script: |
@@ -94,21 +90,19 @@ workflows:
           echo "Building scheme: $SCHEME_NAME"
           mkdir -p build
 
-          export RCT_NEW_ARCH_ENABLED=1
-
-          # Build without code signing (unsigned IPA)
           xcodebuild \
             -workspace "$WORKSPACE" \
             -scheme "$SCHEME_NAME" \
             -configuration Release \
             -sdk iphoneos \
             -derivedDataPath build/DerivedData \
+            build \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="-" \
-            RCT_NEW_ARCH_ENABLED=1
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER=""
 
-          # Find the .app
           APP_PATH=$(find build/DerivedData -name "${SCHEME_NAME}.app" -type d | head -1)
 
           if [ -z "$APP_PATH" ]; then
@@ -119,7 +113,9 @@ workflows:
 
           echo "Found .app at: $APP_PATH"
 
-          # Package .app into .ipa
+          APP_SIZE=$(du -sh "$APP_PATH" | awk '{print $1}')
+          echo "App size: $APP_SIZE"
+
           mkdir -p build/Payload
           cp -R "$APP_PATH" "build/Payload/${SCHEME_NAME}.app"
           cd build
