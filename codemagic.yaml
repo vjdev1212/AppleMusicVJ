@@ -38,12 +38,25 @@ workflows:
           # Fix deployment target
           sed -i 's/platform :ios, .*/platform :ios, "15.0"/' Podfile
 
-          # Force New Architecture in Podfile
-          cat >> Podfile << 'EOF'
-
-          # Force New Architecture
-          ENV['RCT_NEW_ARCH_ENABLED'] = '1'
-          EOF
+          cat > /tmp/patch.js << 'PATCHSCRIPT'
+          const fs = require('fs');
+          let podfile = fs.readFileSync('Podfile', 'utf8');
+          const injection = [
+            '    ENV[\'RCT_NEW_ARCH_ENABLED\'] = \'1\'',
+            '    installer.pods_project.targets.each do |target|',
+            '      target.build_configurations.each do |config|',
+            '        config.build_settings[\'IPHONEOS_DEPLOYMENT_TARGET\'] = \'15.0\'',
+            '      end',
+            '    end',
+            ''
+          ].join('\n');
+          podfile = podfile.replace(
+            'post_install do |installer|',
+            'post_install do |installer|\n' + injection
+          );
+          fs.writeFileSync('Podfile', podfile);
+          PATCHSCRIPT
+          node /tmp/patch.js
 
           echo "Podfile patched:"
           cat Podfile
@@ -78,14 +91,16 @@ workflows:
 
           export RCT_NEW_ARCH_ENABLED=1
 
-          # Build with automatic code signing
+          # Build without code signing (unsigned IPA)
           xcodebuild \
             -workspace "$WORKSPACE" \
             -scheme "$SCHEME_NAME" \
             -configuration Release \
             -sdk iphoneos \
             -derivedDataPath build/DerivedData \
-            -allowProvisioningUpdates \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="-" \
             RCT_NEW_ARCH_ENABLED=1
 
           # Find the .app
