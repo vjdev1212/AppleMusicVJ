@@ -31,6 +31,19 @@ workflows:
           set -e
           cd ios
           sed -i '' 's/platform :ios, .*/platform :ios, "15.1"/' Podfile
+
+          cat >> Podfile << 'POST_INSTALL_HOOK'
+
+          # Force minimum deployment target for all pods (Xcode 26.2 min is 12.0)
+          post_install do |installer|
+            installer.pods_project.targets.each do |target|
+              target.build_configurations.each do |config|
+                config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.1'
+              end
+            end
+          end
+          POST_INSTALL_HOOK
+
           echo "Podfile patched:"
           cat Podfile
 
