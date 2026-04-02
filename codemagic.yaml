@@ -19,69 +19,46 @@ workflows:
           APP_NAME=$(node -p "require('./app.json').expo.name.replace(/[^a-zA-Z0-9]/g, '')")
           echo "APP_VERSION=$APP_VERSION" >> $CM_ENV
           echo "APP_NAME=$APP_NAME" >> $CM_ENV
-          echo "Building: $APP_NAME v$APP_VERSION"
+          echo "📱 Building: $APP_NAME v$APP_VERSION"
 
       - name: Prebuild iOS project
         script: |
           rm -rf ios android
-          npx expo prebuild --clean --platform ios
-          echo "Prebuild complete"
 
-      - name: Patch Podfile
+          export RCT_NEW_ARCH_ENABLED=1
+
+          npx expo prebuild --clean --platform ios
+
+          echo "✅ Prebuild complete"
+
+      - name: Patch Podfile for New Architecture
         script: |
           cd ios
+
+          # Fix deployment target
           sed -i 's/platform :ios, .*/platform :ios, "15.0"/' Podfile
 
-          cat > /tmp/patch.js << 'PATCHSCRIPT'
-          const fs = require('fs');
-          let podfile = fs.readFileSync('Podfile', 'utf8');
-          const injection = [
-            '    installer.pods_project.targets.each do |target|',
-            '      target.build_configurations.each do |config|',
-            '        config.build_settings[\'IPHONEOS_DEPLOYMENT_TARGET\'] = \'15.0\'',
-            '        config.build_settings[\'CODE_SIGNING_ALLOWED\'] = \'NO\'',
-            '        config.build_settings[\'CODE_SIGNING_REQUIRED\'] = \'NO\'',
-            '        config.build_settings[\'CODE_SIGN_IDENTITY\'] = \'-\'',
-            '      end',
-            '    end',
-            '    installer.aggregate_targets.each do |target|',
-            '      target.build_configurations.each do |config|',
-            '        config.build_settings[\'CODE_SIGNING_ALLOWED\'] = \'NO\'',
-            '        config.build_settings[\'CODE_SIGNING_REQUIRED\'] = \'NO\'',
-            '      end',
-            '    end',
-            ''
-          ].join('\n');
-          podfile = podfile.replace(
-            'post_install do |installer|',
-            'post_install do |installer|\n' + injection
-          );
-          fs.writeFileSync('Podfile', podfile);
-          PATCHSCRIPT
-          node /tmp/patch.js
+          # Force New Architecture in Podfile
+          cat >> Podfile << 'EOF'
 
-          echo "Podfile patched:"
+          # Force New Architecture
+          ENV['RCT_NEW_ARCH_ENABLED'] = '1'
+          EOF
+
+          echo "📝 Podfile patched:"
           cat Podfile
 
       - name: Install CocoaPods
         script: |
           cd ios
           rm -rf Pods Podfile.lock
+
+          export RCT_NEW_ARCH_ENABLED=1
+
+          echo "📦 Installing CocoaPods..."
           pod install --repo-update
-          echo "CocoaPods installed successfully"
 
-      - name: Disable code signing in Xcode project
-        script: |
-          PBXPROJ=$(find ios -name "*.pbxproj" | head -1)
-          echo "Patching: $PBXPROJ"
-
-          sed -i 's/CODE_SIGN_IDENTITY = "Apple Development";/CODE_SIGN_IDENTITY = "";/g' "$PBXPROJ"
-          sed -i 's/CODE_SIGN_IDENTITY = "iPhone Developer";/CODE_SIGN_IDENTITY = "";/g' "$PBXPROJ"
-          sed -i 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Manual;/g' "$PBXPROJ"
-          sed -i 's/DEVELOPMENT_TEAM = .*;//g' "$PBXPROJ"
-          sed -i 's/PROVISIONING_PROFILE_SPECIFIER = ".*";//g' "$PBXPROJ"
-
-          echo "Code signing disabled"
+          echo "✅ CocoaPods installed successfully"
 
       - name: Build and create IPA
         script: |
@@ -89,42 +66,42 @@ workflows:
           WORKSPACE=$(find . -name "*.xcworkspace" -maxdepth 1 | head -1)
 
           if [ -z "$WORKSPACE" ]; then
-            echo "No .xcworkspace found"
+            echo "❌ No .xcworkspace found"
             exit 1
           fi
 
           SCHEME_NAME=$(basename "$WORKSPACE" .xcworkspace)
           IPA_NAME="${APP_NAME}_v${APP_VERSION}"
 
-          echo "Building scheme: $SCHEME_NAME"
+          echo "🏗️ Building scheme: $SCHEME_NAME"
           mkdir -p build
 
+          export RCT_NEW_ARCH_ENABLED=1
+
+          # Build without code signing
           xcodebuild \
             -workspace "$WORKSPACE" \
             -scheme "$SCHEME_NAME" \
             -configuration Release \
             -sdk iphoneos \
             -derivedDataPath build/DerivedData \
-            build \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="-" \
-            DEVELOPMENT_TEAM="" \
-            PROVISIONING_PROFILE_SPECIFIER=""
+            RCT_NEW_ARCH_ENABLED=1
 
+          # Find the .app
           APP_PATH=$(find build/DerivedData -name "${SCHEME_NAME}.app" -type d | head -1)
 
           if [ -z "$APP_PATH" ]; then
-            echo "No .app found"
+            echo "❌ No .app found"
             find build/DerivedData -name "*.app" -type d || true
             exit 1
           fi
 
-          echo "Found .app at: $APP_PATH"
+          echo "✅ Found .app at: $APP_PATH"
 
-          APP_SIZE=$(du -sh "$APP_PATH" | awk '{print $1}')
-          echo "App size: $APP_SIZE"
-
+          # Package .app into .ipa
           mkdir -p build/Payload
           cp -R "$APP_PATH" "build/Payload/${SCHEME_NAME}.app"
           cd build
@@ -132,13 +109,13 @@ workflows:
           rm -rf Payload
 
           IPA_SIZE=$(ls -lh "${IPA_NAME}.ipa" | awk '{print $5}')
-          echo "IPA created: ${IPA_NAME}.ipa (${IPA_SIZE})"
+          echo "✅ IPA created: ${IPA_NAME}.ipa (${IPA_SIZE})"
 
     artifacts:
       - ios/build/*.ipa
 
   strmify-android-build:
-    name: AppleMusic Android Build
+    name: MyApp Android Build
     environment:
       node: "20"
       java: latest
@@ -168,7 +145,7 @@ workflows:
 
           APK_NAME="${APP_NAME}_v${APP_VERSION}_release.apk"
           cp app/build/outputs/apk/release/app-release.apk "../$APK_NAME"
-          echo "APK created: $APK_NAME"
+          echo "✅ APK created: $APK_NAME"
 
     artifacts:
       - "*.apk"
