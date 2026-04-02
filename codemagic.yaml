@@ -24,7 +24,7 @@ workflows:
       - name: Prebuild iOS project
         script: |
           rm -rf ios android
-          npx expo prebuild --clean --platform ios
+          RCT_NEW_ARCH_ENABLED=0 npx expo prebuild --clean --platform ios
           echo "Prebuild complete"
 
       - name: Patch Podfile
@@ -36,6 +36,7 @@ workflows:
           const fs = require('fs');
           let podfile = fs.readFileSync('Podfile', 'utf8');
           const injection = [
+            '    ENV[\'RCT_NEW_ARCH_ENABLED\'] = \'0\'',
             '    installer.pods_project.targets.each do |target|',
             '      target.build_configurations.each do |config|',
             '        config.build_settings[\'IPHONEOS_DEPLOYMENT_TARGET\'] = \'15.0\'',
