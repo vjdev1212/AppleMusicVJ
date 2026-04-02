@@ -30,7 +30,7 @@ workflows:
         script: |
           set -e
           cd ios
-          sed -i '' 's/platform :ios, .*/platform :ios, "15.0"/' Podfile
+          sed -i '' 's/platform :ios, .*/platform :ios, "15.1"/' Podfile
           echo "Podfile patched:"
           cat Podfile
 

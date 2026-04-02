@@ -18,6 +18,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.applemusicplayer.app",
+      "deploymentTarget": "15.1",
       "buildNumber": "1",
       "entitlements": {
         "com.apple.developer.playback-continue": true
