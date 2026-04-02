@@ -1,161 +1,112 @@
 workflows:
   strmify-ios-build:
-    name: MyApp iOS Build
+    name: AppleMusic iOS Build
     environment:
-      node: latest
-      xcode: latest
+      node: "20"
+      xcode: "15.4"
       groups:
         - EXPO
-      vars:
-        RCT_NEW_ARCH_ENABLED: 1
     scripts:
       - name: Install dependencies
-        script: npm install --force
-
-      - name: Install Expo CLI
-        script: npm install -g @expo/cli@latest --force
+        script: npm ci
 
       - name: Extract app version from app.json
         script: |
+          set -e
           APP_VERSION=$(node -p "require('./app.json').expo.version")
           APP_NAME=$(node -p "require('./app.json').expo.name.replace(/[^a-zA-Z0-9]/g, '')")
           echo "APP_VERSION=$APP_VERSION" >> $CM_ENV
           echo "APP_NAME=$APP_NAME" >> $CM_ENV
-          echo "📱 Building: $APP_NAME v$APP_VERSION"
+          echo "Building: $APP_NAME v$APP_VERSION"
 
-      - name: Prebuild iOS project with New Architecture
+      - name: Prebuild iOS project
         script: |
+          set -e
           rm -rf ios android
-          
-          # ✅ CRITICAL: Export the flag BEFORE prebuild
-          export RCT_NEW_ARCH_ENABLED=1
-          
           npx expo prebuild --clean --platform ios
-          
-          # Verify it was set correctly
-          echo "🔍 Checking if New Architecture is enabled..."
-          grep -r "RCT_NEW_ARCH_ENABLED" ios/*.xcodeproj/project.pbxproj || echo "⚠️ Not found in project"
-          
-          # Fix deployment target
-          sed -i '' 's/platform :ios, .*/platform :ios, "15.0"/' ios/Podfile
-          echo "✅ Deployment target set to 15.0"
+          echo "Prebuild complete"
 
-      - name: Patch Podfile for New Architecture
+      - name: Patch Podfile for deployment target
         script: |
+          set -e
           cd ios
-          
-          # ✅ Add explicit New Architecture flag to Podfile
-          cat >> Podfile << 'EOF'
-
-          # Force New Architecture
-          ENV['RCT_NEW_ARCH_ENABLED'] = '1'
-          EOF
-          
-          echo "📝 Podfile contents:"
+          sed -i '' 's/platform :ios, .*/platform :ios, "15.0"/' Podfile
+          echo "Podfile patched:"
           cat Podfile
 
       - name: Install CocoaPods
         script: |
+          set -e
           cd ios
           rm -rf Pods Podfile.lock
-          
-          # ✅ Set the flag during pod install too
-          export RCT_NEW_ARCH_ENABLED=1
-          
-          echo "📦 Installing CocoaPods..."
+          echo "Installing CocoaPods..."
           pod install --repo-update
-          
-          echo "✅ CocoaPods installed successfully"
+          echo "CocoaPods installed successfully"
 
-      - name: Archive with Xcode
+      - name: Build and create IPA
         script: |
+          set -e
           cd ios
           WORKSPACE=$(find . -name "*.xcworkspace" -maxdepth 1 | head -1)
-          
+
           if [ -z "$WORKSPACE" ]; then
-            echo "❌ No .xcworkspace found"
+            echo "No .xcworkspace found"
+            ls -la
             exit 1
           fi
-          
+
           SCHEME_NAME=$(basename "$WORKSPACE" .xcworkspace)
-          echo "🏗️ Building scheme: $SCHEME_NAME"
-          
+          IPA_NAME="${APP_NAME}_v${APP_VERSION}"
+
+          echo "Building scheme: $SCHEME_NAME"
           mkdir -p build
-          
-          # ✅ Set the flag during build
-          export RCT_NEW_ARCH_ENABLED=1
-          
+
           xcodebuild \
             -workspace "$WORKSPACE" \
             -scheme "$SCHEME_NAME" \
             -configuration Release \
-            -destination "generic/platform=iOS" \
-            -archivePath "build/$SCHEME_NAME.xcarchive" \
-            archive \
-            RCT_NEW_ARCH_ENABLED=1 \
-            CODE_SIGN_IDENTITY="" \
+            -sdk iphoneos \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO
-          
-          echo "✅ Archive created successfully"
+            CODE_SIGN_IDENTITY="-"
 
-      - name: Export IPA
-        script: |
-          cd ios
-          WORKSPACE=$(find . -name "*.xcworkspace" -maxdepth 1 | head -1)
-          SCHEME_NAME=$(basename "$WORKSPACE" .xcworkspace)
-          IPA_NAME="${APP_NAME}_v${APP_VERSION}"
-          
-          cat > build/ExportOptions.plist << 'EOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>method</key>
-              <string>development</string>
-              <key>compileBitcode</key>
-              <false/>
-          </dict>
-          </plist>
-          EOF
-          
-          echo "📦 Exporting IPA..."
-          xcodebuild -exportArchive \
-            -archivePath "build/$SCHEME_NAME.xcarchive" \
-            -exportPath "build/export" \
-            -exportOptionsPlist build/ExportOptions.plist
-          
-          EXPORTED_IPA=$(find build/export -name "*.ipa" | head -1)
-          
-          if [ -z "$EXPORTED_IPA" ]; then
-            echo "❌ No IPA found in export directory"
-            ls -la build/export/ || true
+          APP_PATH=$(find build/DerivedData -name "${SCHEME_NAME}.app" -type d | head -1)
+
+          if [ -z "$APP_PATH" ]; then
+            echo "No .app found after build"
+            find build/DerivedData -name "*.app" -type d || true
             exit 1
           fi
-          
-          cp "$EXPORTED_IPA" "build/${IPA_NAME}.ipa"
-          IPA_SIZE=$(ls -lh "build/${IPA_NAME}.ipa" | awk '{print $5}')
-          
-          echo "✅ IPA created: ${IPA_NAME}.ipa (${IPA_SIZE})"
+
+          echo "Found .app at: $APP_PATH"
+
+          mkdir -p build/Payload
+          cp -R "$APP_PATH" "build/Payload/${SCHEME_NAME}.app"
+          cd build
+          zip -r "${IPA_NAME}.ipa" Payload
+          rm -rf Payload
+
+          IPA_SIZE=$(ls -lh "${IPA_NAME}.ipa" | awk '{print $5}')
+          echo "IPA created: ${IPA_NAME}.ipa (${IPA_SIZE})"
 
     artifacts:
       - ios/build/*.ipa
-      - ios/build/**/*.xcarchive
 
-  # Android workflows remain unchanged
   strmify-android-build:
-    name: Strmify Android Build
+    name: AppleMusic Android Build
     environment:
-      node: latest
+      node: "20"
       java: latest
       groups:
         - EXPO
     scripts:
       - name: Install dependencies
-        script: npm install --force
+        script: npm ci
 
       - name: Extract app version from app.json
         script: |
+          set -e
           APP_VERSION=$(node -p "require('./app.json').expo.version")
           APP_NAME=$(node -p "require('./app.json').expo.name.replace(/[^a-zA-Z0-9]/g, '')")
           echo "APP_VERSION=$APP_VERSION" >> $CM_ENV
@@ -163,18 +114,19 @@ workflows:
 
       - name: Clean and generate Android project
         script: |
+          set -e
           rm -rf ios android
-          npm install -g @expo/cli@latest --force
           npx expo prebuild --platform android
 
       - name: Build Android APK
         script: |
+          set -e
           cd android
           ./gradlew assembleRelease -x configureCMakeRelease -Pandroid.overridePathCheck=true
-          
+
           APK_NAME="${APP_NAME}_v${APP_VERSION}_release.apk"
           cp app/build/outputs/apk/release/app-release.apk "../$APK_NAME"
-          echo "✅ APK created: $APK_NAME"
+          echo "APK created: $APK_NAME"
 
     artifacts:
       - "*.apk"
