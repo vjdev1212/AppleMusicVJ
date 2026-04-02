@@ -159,9 +159,9 @@ const PlaylistResultCard: React.FC<{
           <View style={styles.playlistRowInfo}>
             <Text style={[styles.playlistRowName, { color: colors.text }]} numberOfLines={1}>{item.name}</Text>
             <View style={styles.playlistRowMeta}>
-              <View style={[styles.onlineDot, { backgroundColor: '#34C759' }]} />
+              <View style={[styles.onlineDot, { backgroundColor: item.isOffline ? '#0984E3' : '#34C759' }]} />
               <Text style={[styles.playlistRowCount, { color: colors.textSecondary }]}>
-                {item.songs.length} songs · Online
+                {item.songs.length} songs · {item.isOffline ? 'Offline' : 'Online'}
               </Text>
             </View>
           </View>
@@ -193,37 +193,6 @@ const AnimatedSongRow: React.FC<{ children: React.ReactNode; index: number }> = 
   );
 };
 
-// ─── Category Card ────────────────────────────────────────────────────────────
-const CategoryCard: React.FC<{
-  label: string;
-  index: number;
-  colors: any;
-  onPress: () => void;
-}> = ({ label, index, colors, onPress }) => {
-  const scaleAnim = useRef(new Animated.Value(0)).current;
-  const pressAnim = useRef(new Animated.Value(1)).current;
-  const combo = getThemeCombo(label);
-
-  useEffect(() => {
-    Animated.spring(scaleAnim, { toValue: 1, delay: index * 70, tension: 60, friction: 8, useNativeDriver: true }).start();
-  }, []);
-
-  const onPressIn = () => Animated.spring(pressAnim, { toValue: 0.92, useNativeDriver: true, tension: 200 }).start();
-  const onPressOut = () => Animated.spring(pressAnim, { toValue: 1, useNativeDriver: true, tension: 200 }).start();
-
-  return (
-    <Animated.View style={[styles.categoryWrapper, { opacity: scaleAnim, transform: [{ scale: Animated.multiply(scaleAnim, pressAnim) }, { translateY: scaleAnim.interpolate({ inputRange: [0, 1], outputRange: [30, 0] }) }] }]}>
-      <TouchableOpacity activeOpacity={1} onPress={onPress} onPressIn={onPressIn} onPressOut={onPressOut}>
-        <LinearGradient colors={combo.colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.categoryCard}>
-          <View style={styles.categoryCircle} />
-          <Ionicons name={combo.icon as any} size={28} color="rgba(255,255,255,0.35)" style={styles.categoryBgIcon} />
-          <Text style={styles.categoryText}>{label}</Text>
-          <Ionicons name={combo.icon as any} size={18} color="rgba(255,255,255,0.9)" />
-        </LinearGradient>
-      </TouchableOpacity>
-    </Animated.View>
-  );
-};
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export const SearchScreen: React.FC = () => {
@@ -257,38 +226,33 @@ export const SearchScreen: React.FC = () => {
     outputRange: ['rgba(128,128,128,0.15)', colors.primary],
   });
 
-  // ── Only online (Google Drive) playlists ──────────────────────────────────
-  const onlinePlaylists = useMemo(
-    () => playlists.filter(p => p.source === 'google-drive'),
-    [playlists]
-  );
-
+  // ── Search through all playlists (Online + Offline) ──────────────────────
   const filteredPlaylists = useMemo(() => {
     if (!searchQuery.trim()) return [];
     const q = searchQuery.toLowerCase();
-    return onlinePlaylists.filter(
+    return playlists.filter(
       p => p.name.toLowerCase().includes(q) || p.description?.toLowerCase().includes(q)
     );
-  }, [onlinePlaylists, searchQuery]);
+  }, [playlists, searchQuery]);
 
-  // All unique songs from online playlists only
-  const allOnlineSongs = useMemo(() => {
+  // All unique songs from all playlists
+  const allSongs = useMemo(() => {
     const songs: Song[] = [];
-    onlinePlaylists.forEach(p => {
+    playlists.forEach(p => {
       p.songs.forEach(s => {
         if (!songs.find(item => item.id === s.id)) songs.push(s);
       });
     });
     return songs;
-  }, [onlinePlaylists]);
+  }, [playlists]);
 
   const filteredSongs = useMemo(() => {
     if (!searchQuery.trim()) return [];
     const q = searchQuery.toLowerCase();
-    return allOnlineSongs.filter(
+    return allSongs.filter(
       s => s.title.toLowerCase().includes(q) || s.artist?.toLowerCase().includes(q)
     );
-  }, [allOnlineSongs, searchQuery]);
+  }, [allSongs, searchQuery]);
 
   const hasResults = filteredPlaylists.length > 0 || filteredSongs.length > 0;
 
@@ -296,7 +260,7 @@ export const SearchScreen: React.FC = () => {
     navigation.navigate('Playlist', { playlist });
 
   const handleSongPress = (song: Song) => {
-    const playlist = onlinePlaylists.find(p => p.songs.some(s => s.id === song.id));
+    const playlist = playlists.find(p => p.songs.some(s => s.id === song.id));
     if (playlist) {
       const idx = playlist.songs.findIndex(s => s.id === song.id);
       loadPlaylist(playlist.songs, idx);
@@ -325,37 +289,27 @@ export const SearchScreen: React.FC = () => {
     ]);
   };
 
-  const CATEGORIES = ['Tamil', 'Hindi', 'English', 'Melody', 'Beats', 'Romantic'];
-
   // ── Render ────────────────────────────────────────────────────────────────
   const renderBody = () => {
-    // No query → Browse categories
+    // No query → Default empty state instead of categories
     if (!searchQuery.trim()) {
       return (
-        <View style={styles.browseWrap}>
-          <Animated.Text
-            style={[
-              styles.browseTitle,
-              {
-                color: colors.text, opacity: headerFadeAnim,
-                transform: [{ translateY: headerSlideAnim }]
-              },
-            ]}
+        <Animated.View style={[styles.emptyState, { opacity: headerFadeAnim }]}>
+          <LinearGradient
+            colors={isDark ? ['#1c1c20', '#111113'] : ['#f2f2f7', '#e5e5ea']}
+            style={styles.emptyCard}
           >
-            Browse
-          </Animated.Text>
-          <View style={styles.categoriesGrid}>
-            {CATEGORIES.map((cat, i) => (
-              <CategoryCard
-                key={cat}
-                label={cat}
-                index={i}
-                colors={colors}
-                onPress={() => setSearchQuery(cat)}
-              />
-            ))}
-          </View>
-        </View>
+            <View style={[styles.emptyIconCircle, { backgroundColor: colors.primary + '18' }]}>
+              <Ionicons name="search-outline" size={48} color={colors.primary} />
+            </View>
+            <Text style={[styles.emptyText, { color: colors.text }]}>
+              Search your library
+            </Text>
+            <Text style={[styles.emptySubtext, { color: colors.textSecondary }]}>
+              Find songs and playlists across your entire online and offline collections.
+            </Text>
+          </LinearGradient>
+        </Animated.View>
       );
     }
 
@@ -516,28 +470,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
 
-  // Browse
-  browseWrap: { paddingHorizontal: Spacing.md, paddingTop: Spacing.md },
-  browseTitle: { fontSize: FontSize.xxl, fontWeight: '800', letterSpacing: -0.4, marginBottom: Spacing.md },
-  categoriesGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: Spacing.sm },
-  categoryWrapper: { width: '48%' },
-  categoryCard: {
-    height: 90,
-    borderRadius: BorderRadius.xl,
-    justifyContent: 'flex-end',
-    padding: Spacing.md,
-    overflow: 'hidden',
-    ...Platform.select({
-      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 10 },
-      android: { elevation: 5 },
-    }),
-  },
-  categoryCircle: {
-    position: 'absolute', width: 100, height: 100, borderRadius: 50,
-    backgroundColor: 'rgba(255,255,255,0.1)', top: -30, right: -20,
-  },
-  categoryBgIcon: { position: 'absolute', top: 10, right: 10 },
-  categoryText: { color: '#fff', fontSize: FontSize.md, fontWeight: '800', letterSpacing: -0.2 },
 
   // Sections
   section: { paddingHorizontal: Spacing.md, marginBottom: Spacing.md },
