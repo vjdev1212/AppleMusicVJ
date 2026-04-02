@@ -3,7 +3,7 @@ workflows:
     name: AppleMusic iOS Build
     environment:
       node: "20"
-      xcode: "15.4"
+      xcode: latest
       groups:
         - EXPO
     scripts:
