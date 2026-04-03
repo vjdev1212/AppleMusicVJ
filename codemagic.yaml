@@ -6,6 +6,8 @@ workflows:
       xcode: latest
       groups:
         - EXPO
+      vars:
+        RCT_NEW_ARCH_ENABLED: 0
     scripts:
       - name: Install dependencies
         script: npm install --force
@@ -19,69 +21,95 @@ workflows:
           APP_NAME=$(node -p "require('./app.json').expo.name.replace(/[^a-zA-Z0-9]/g, '')")
           echo "APP_VERSION=$APP_VERSION" >> $CM_ENV
           echo "APP_NAME=$APP_NAME" >> $CM_ENV
-          echo "Building: $APP_NAME v$APP_VERSION"
+          echo "📱 Building: $APP_NAME v$APP_VERSION"
 
       - name: Prebuild iOS project
         script: |
           rm -rf ios android
-          RCT_NEW_ARCH_ENABLED=0 npx expo prebuild --clean --platform ios
-          echo "Prebuild complete"
+          export RCT_NEW_ARCH_ENABLED=0
+          npx expo prebuild --clean --platform ios
+          echo "✅ Prebuild complete"
 
       - name: Patch Podfile
         script: |
           cd ios
-          sed -i 's/platform :ios, .*/platform :ios, "15.0"/' Podfile
 
-          cat > /tmp/patch.js << 'PATCHSCRIPT'
-          const fs = require('fs');
-          let podfile = fs.readFileSync('Podfile', 'utf8');
-          const injection = [
-            '    ENV[\'RCT_NEW_ARCH_ENABLED\'] = \'0\'',
-            '    installer.pods_project.targets.each do |target|',
-            '      target.build_configurations.each do |config|',
-            '        config.build_settings[\'IPHONEOS_DEPLOYMENT_TARGET\'] = \'15.0\'',
-            '        config.build_settings[\'CODE_SIGNING_ALLOWED\'] = \'NO\'',
-            '        config.build_settings[\'CODE_SIGNING_REQUIRED\'] = \'NO\'',
-            '        config.build_settings[\'CODE_SIGN_IDENTITY\'] = \'-\'',
-            '      end',
-            '    end',
-            ''
-          ].join('\n');
-          podfile = podfile.replace(
-            'post_install do |installer|',
-            'post_install do |installer|\n' + injection
-          );
-          fs.writeFileSync('Podfile', podfile);
-          PATCHSCRIPT
-          node /tmp/patch.js
+          # Fix platform version
+          sed -i '' 's/platform :ios, .*/platform :ios, "15.0"/' Podfile
 
-          echo "Podfile patched:"
+          # Inject post_install hook with proper Ruby syntax
+          cat > /tmp/patch_podfile.rb << 'RUBY_PATCH'
+          require 'fileutils'
+
+          podfile_path = 'Podfile'
+          content = File.read(podfile_path)
+
+          # Check if already patched
+          if content.include?('CUSTOM_DEPLOYMENT_TARGET_PATCH')
+            puts "✅ Podfile already patched, skipping"
+            exit 0
+          end
+
+          injection = <<~INJECTION
+            
+            # CUSTOM_DEPLOYMENT_TARGET_PATCH
+            ENV['RCT_NEW_ARCH_ENABLED'] = '0'
+            
+            post_install do |installer|
+              installer.pods_project.targets.each do |target|
+                target.build_configurations.each do |config|
+                  config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
+                  config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
+                  config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
+                  config.build_settings['CODE_SIGN_IDENTITY'] = ''
+                  config.build_settings['EXPANDED_CODE_SIGN_IDENTITY'] = ''
+                end
+              end
+            end
+          INJECTION
+
+          # Remove existing post_install if present
+          content.gsub!(/post_install do \|installer\|.*?end/m, '')
+
+          # Append our post_install
+          content += injection
+
+          File.write(podfile_path, content)
+          puts "✅ Podfile patched successfully"
+          RUBY_PATCH
+
+          ruby /tmp/patch_podfile.rb
+
+          echo "📄 Final Podfile:"
           cat Podfile
 
       - name: Install CocoaPods
         script: |
           cd ios
           rm -rf Pods Podfile.lock
+          export RCT_NEW_ARCH_ENABLED=0
           pod install --repo-update
-          echo "CocoaPods installed successfully"
+          echo "✅ CocoaPods installed successfully"
 
       - name: Build and create IPA
         script: |
           set -e
           cd ios
+
           WORKSPACE=$(find . -name "*.xcworkspace" -maxdepth 1 | head -1)
 
           if [ -z "$WORKSPACE" ]; then
-            echo "No .xcworkspace found"
+            echo "❌ No .xcworkspace found"
             exit 1
           fi
 
           SCHEME_NAME=$(basename "$WORKSPACE" .xcworkspace)
           IPA_NAME="${APP_NAME}_v${APP_VERSION}"
 
-          echo "Building scheme: $SCHEME_NAME"
+          echo "🏗️ Building scheme: $SCHEME_NAME"
           mkdir -p build
 
+          # Build the app
           xcodebuild \
             -workspace "$WORKSPACE" \
             -scheme "$SCHEME_NAME" \
@@ -90,38 +118,52 @@ workflows:
             -derivedDataPath build/DerivedData \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
+            EXPANDED_CODE_SIGN_IDENTITY="" \
+            RCT_NEW_ARCH_ENABLED=0 \
             build
 
-          APP_PATH=$(find build/DerivedData -name "${SCHEME_NAME}.app" -type d | head -1)
+          # Find the .app bundle
+          APP_PATH=$(find build/DerivedData/Build/Products/Release-iphoneos -name "*.app" -type d | head -1)
 
           if [ -z "$APP_PATH" ]; then
-            echo "No .app found"
+            echo "❌ No .app found"
+            echo "🔍 Searching in DerivedData:"
             find build/DerivedData -name "*.app" -type d || true
             exit 1
           fi
 
-          echo "Found .app at: $APP_PATH"
+          echo "✅ Found .app at: $APP_PATH"
 
-          BINARY_PATH="$APP_PATH/$SCHEME_NAME"
+          # Verify binary exists
+          BINARY_NAME=$(basename "$APP_PATH" .app)
+          BINARY_PATH="$APP_PATH/$BINARY_NAME"
+
           if [ ! -f "$BINARY_PATH" ]; then
-            echo "ERROR: No binary found at $BINARY_PATH"
-            ls -la "$APP_PATH"
-            exit 1
+            echo "⚠️ Binary not found at expected location, searching..."
+            BINARY_PATH=$(find "$APP_PATH" -type f -perm +111 | head -1)
+            
+            if [ -z "$BINARY_PATH" ]; then
+              echo "❌ No executable binary found"
+              ls -la "$APP_PATH"
+              exit 1
+            fi
           fi
 
           BINARY_SIZE=$(ls -lh "$BINARY_PATH" | awk '{print $5}')
-          echo "Binary size: $BINARY_SIZE"
+          echo "📦 Binary size: $BINARY_SIZE"
 
+          # Create IPA
           mkdir -p build/Payload
-          cp -R "$APP_PATH" "build/Payload/${SCHEME_NAME}.app"
+          cp -R "$APP_PATH" build/Payload/
+
           cd build
-          zip -r "${IPA_NAME}.ipa" Payload
+          zip -qr "${IPA_NAME}.ipa" Payload
           rm -rf Payload
 
           IPA_SIZE=$(ls -lh "${IPA_NAME}.ipa" | awk '{print $5}')
-          echo "IPA created: ${IPA_NAME}.ipa (${IPA_SIZE})"
+          echo "✅ IPA created: ${IPA_NAME}.ipa (${IPA_SIZE})"
 
     artifacts:
       - ios/build/*.ipa
@@ -143,6 +185,7 @@ workflows:
           APP_NAME=$(node -p "require('./app.json').expo.name.replace(/[^a-zA-Z0-9]/g, '')")
           echo "APP_VERSION=$APP_VERSION" >> $CM_ENV
           echo "APP_NAME=$APP_NAME" >> $CM_ENV
+          echo "📱 Building: $APP_NAME v$APP_VERSION"
 
       - name: Clean and generate Android project
         script: |
@@ -157,7 +200,9 @@ workflows:
 
           APK_NAME="${APP_NAME}_v${APP_VERSION}_release.apk"
           cp app/build/outputs/apk/release/app-release.apk "../$APK_NAME"
-          echo "APK created: $APK_NAME"
+
+          APK_SIZE=$(ls -lh "../$APK_NAME" | awk '{print $5}')
+          echo "✅ APK created: $APK_NAME (${APK_SIZE})"
 
     artifacts:
       - "*.apk"
