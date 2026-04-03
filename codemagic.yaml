@@ -93,13 +93,17 @@ workflows:
           mkdir -p build
 
           xcodebuild \
-            -workspace "$WORKSPACE" \
-            -scheme "$SCHEME_NAME" \
-            -configuration Release \
-            -sdk iphoneos \
-            -derivedDataPath build/DerivedData \
-            -UseModernBuildSystem=YES \
-            clean build
+          -workspace "$WORKSPACE" \
+          -scheme "$SCHEME_NAME" \
+          -configuration Release \
+          -sdk iphoneos \
+          -derivedDataPath build/DerivedData \
+          -UseModernBuildSystem=YES \
+          CODE_SIGNING_ALLOWED=NO \
+          CODE_SIGNING_REQUIRED=NO \
+          CODE_SIGN_IDENTITY="" \
+          DEVELOPMENT_TEAM="" \
+          clean build
 
           APP_PATH=$(find build/DerivedData/Build/Products/Release-iphoneos -name "*.app" -type d | head -1)
 
