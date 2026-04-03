@@ -71,10 +71,10 @@ workflows:
             echo "⚠️ Missing expo-configure-project.sh, creating dummy file"
             mkdir -p "Pods/Target Support Files/Pods-AppleMusicPlayer"
 
-cat << 'EOF' > "Pods/Target Support Files/Pods-AppleMusicPlayer/expo-configure-project.sh"
-#!/bin/sh
-exit 0
-EOF
+            cat << 'EOF' > "Pods/Target Support Files/Pods-AppleMusicPlayer/expo-configure-project.sh"
+            #!/bin/sh
+            exit 0
+            EOF
 
             chmod +x "Pods/Target Support Files/Pods-AppleMusicPlayer/expo-configure-project.sh"
           fi
