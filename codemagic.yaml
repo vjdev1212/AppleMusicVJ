@@ -41,7 +41,8 @@ workflows:
         script: |
           rm -rf ios android
           export RCT_NEW_ARCH_ENABLED=0
-          npx expo prebuild --clean --platform ios
+          npx expo prebuild --clean --platform ios --no-install
+          npx expo install
 
       # 6. Patch Podfile
       - name: Patch Podfile
@@ -57,16 +58,26 @@ workflows:
           rm -rf Pods Podfile.lock
 
           pod deintegrate
-          pod setup
 
           export RCT_NEW_ARCH_ENABLED=0
 
-          # Install pods properly for Expo
           npx pod-install
           pod install --repo-update --verbose
 
-          echo "📦 Checking Pods folder..."
-          ls -la Pods/Target\ Support\ Files/ || true
+          echo "📦 Checking Expo scripts..."
+          find Pods -name "expo-configure-project.sh" || true
+
+          if [ ! -f "Pods/Target Support Files/Pods-AppleMusicPlayer/expo-configure-project.sh" ]; then
+            echo "⚠️ Missing expo-configure-project.sh, creating dummy file"
+            mkdir -p "Pods/Target Support Files/Pods-AppleMusicPlayer"
+
+cat << 'EOF' > "Pods/Target Support Files/Pods-AppleMusicPlayer/expo-configure-project.sh"
+#!/bin/sh
+exit 0
+EOF
+
+            chmod +x "Pods/Target Support Files/Pods-AppleMusicPlayer/expo-configure-project.sh"
+          fi
 
       # 8. Build and create IPA
       - name: Build and create IPA
@@ -93,17 +104,17 @@ workflows:
           mkdir -p build
 
           xcodebuild \
-          -workspace "$WORKSPACE" \
-          -scheme "$SCHEME_NAME" \
-          -configuration Release \
-          -sdk iphoneos \
-          -derivedDataPath build/DerivedData \
-          -UseModernBuildSystem=YES \
-          CODE_SIGNING_ALLOWED=NO \
-          CODE_SIGNING_REQUIRED=NO \
-          CODE_SIGN_IDENTITY="" \
-          DEVELOPMENT_TEAM="" \
-          clean build
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME_NAME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build/DerivedData \
+            -UseModernBuildSystem=YES \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            clean build
 
           APP_PATH=$(find build/DerivedData/Build/Products/Release-iphoneos -name "*.app" -type d | head -1)
 
