@@ -56,7 +56,6 @@ workflows:
           cd ios
 
           rm -rf Pods Podfile.lock
-
           pod deintegrate
 
           export RCT_NEW_ARCH_ENABLED=0
@@ -71,12 +70,12 @@ workflows:
             echo "⚠️ Missing expo-configure-project.sh, creating dummy file"
             mkdir -p "Pods/Target Support Files/Pods-AppleMusicPlayer"
 
-            cat << 'EOF' > "Pods/Target Support Files/Pods-AppleMusicPlayer/expo-configure-project.sh"
+            cat <<'EOF' > "Pods/Target Support Files/Pods-AppleMusicPlayer/expo-configure-project.sh"
             #!/bin/sh
             exit 0
             EOF
 
-            chmod +x "Pods/Target Support Files/Pods-AppleMusicPlayer/expo-configure-project.sh"
+                  chmod +x "Pods/Target Support Files/Pods-AppleMusicPlayer/expo-configure-project.sh"
           fi
 
       # 8. Build and create IPA
@@ -96,7 +95,7 @@ workflows:
             exit 1
           fi
 
-          SCHEME_NAME=$(basename "$WORKSPACE" .xcworkspace)
+          SCHEME_NAME=$(xcodebuild -workspace "$WORKSPACE" -list | grep -A 1 "Schemes:" | tail -n 1 | xargs)
           IPA_NAME="${APP_NAME}_v${APP_VERSION}"
 
           echo "🏗️ Building scheme: $SCHEME_NAME"
