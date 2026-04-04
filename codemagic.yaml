@@ -1,19 +1,23 @@
 workflows:
   ios-build:
     name: AppleMusic iOS Build
+
     environment:
-      node: "20"
+      node: 20
       xcode: latest
       cocoapods: default
       vars:
         RCT_NEW_ARCH_ENABLED: 0
 
     scripts:
-      # 1. Install dependencies
+      # 1. Clean & install dependencies (FIXED)
       - name: Install dependencies
         script: |
-          rm -rf node_modules package-lock.json
+          rm -rf node_modules package-lock.json ios android
           npm install
+
+          npx expo doctor --fix-dependencies || true
+          npx expo install --fix
 
       # 2. Install Expo CLI
       - name: Install Expo CLI
@@ -39,18 +43,16 @@ workflows:
       # 5. Prebuild iOS project
       - name: Prebuild iOS project
         script: |
-          rm -rf ios android
           export RCT_NEW_ARCH_ENABLED=0
-          npx expo prebuild --clean --platform ios --no-install
-          npx expo install
+          npx expo prebuild --clean --platform ios
 
-      # 6. Patch Podfile
+      # 6. Force iOS deployment target (CRITICAL FIX)
       - name: Patch Podfile
         script: |
           cd ios
           sed -i '' 's/platform :ios, .*/platform :ios, "15.0"/' Podfile || true
 
-      # 7. Install CocoaPods
+      # 7. Install CocoaPods (FIXED EOF ISSUE)
       - name: Install CocoaPods
         script: |
           cd ios
@@ -60,14 +62,13 @@ workflows:
 
           export RCT_NEW_ARCH_ENABLED=0
 
-          npx pod-install
           pod install --repo-update --verbose
 
           echo "📦 Checking Expo scripts..."
           find Pods -name "expo-configure-project.sh" || true
 
           if [ ! -f "Pods/Target Support Files/Pods-AppleMusicPlayer/expo-configure-project.sh" ]; then
-            echo "⚠️ Missing expo-configure-project.sh, creating dummy file"
+            echo "⚠️ Creating missing expo-configure-project.sh"
             mkdir -p "Pods/Target Support Files/Pods-AppleMusicPlayer"
 
             cat <<'EOF' > "Pods/Target Support Files/Pods-AppleMusicPlayer/expo-configure-project.sh"
@@ -75,18 +76,14 @@ workflows:
             exit 0
             EOF
 
-                  chmod +x "Pods/Target Support Files/Pods-AppleMusicPlayer/expo-configure-project.sh"
+            chmod +x "Pods/Target Support Files/Pods-AppleMusicPlayer/expo-configure-project.sh"
           fi
 
-      # 8. Build and create IPA
-      - name: Build and create IPA
+      # 8. Build IPA (STABLE VERSION)
+      - name: Build IPA
         script: |
           set -e
           cd ios
-
-          echo "📂 Debug workspace:"
-          ls -la
-          ls -la *.xcworkspace || true
 
           WORKSPACE=$(find . -name "*.xcworkspace" -maxdepth 1 | head -1)
 
@@ -95,10 +92,11 @@ workflows:
             exit 1
           fi
 
-          SCHEME_NAME=$(xcodebuild -workspace "$WORKSPACE" -list | grep -A 1 "Schemes:" | tail -n 1 | xargs)
-          IPA_NAME="${APP_NAME}_v${APP_VERSION}"
+          echo "📦 Workspace: $WORKSPACE"
 
-          echo "🏗️ Building scheme: $SCHEME_NAME"
+          SCHEME_NAME=$(xcodebuild -workspace "$WORKSPACE" -list | grep -A 1 "Schemes:" | tail -n 1 | xargs)
+
+          echo "🏗️ Scheme: $SCHEME_NAME"
 
           mkdir -p build
 
@@ -107,30 +105,23 @@ workflows:
             -scheme "$SCHEME_NAME" \
             -configuration Release \
             -sdk iphoneos \
-            -derivedDataPath build/DerivedData \
-            -UseModernBuildSystem=YES \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            DEVELOPMENT_TEAM="" \
-            clean build
+            -archivePath build/App.xcarchive \
+            archive
 
-          APP_PATH=$(find build/DerivedData/Build/Products/Release-iphoneos -name "*.app" -type d | head -1)
+          APP_PATH=$(find build -name "*.app" -type d | head -1)
 
           if [ -z "$APP_PATH" ]; then
             echo "❌ No .app found"
             exit 1
           fi
 
-          echo "✅ Found app: $APP_PATH"
-
           mkdir -p build/Payload
           cp -R "$APP_PATH" build/Payload/
 
           cd build
-          zip -qr "${IPA_NAME}.ipa" Payload
+          zip -qr "${APP_NAME}_v${APP_VERSION}.ipa" Payload
 
-          echo "✅ IPA created: ${IPA_NAME}.ipa"
+          echo "✅ IPA created successfully"
 
     artifacts:
       - ios/build/*.ipa
