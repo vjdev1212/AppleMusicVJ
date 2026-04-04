@@ -43,7 +43,13 @@ workflows:
           set -e
           rm -rf ios android
           export RCT_NEW_ARCH_ENABLED=0
-          npx expo prebuild --clean --platform ios
+          
+          # Generate the iOS project but skip automatic pod install
+          npx expo prebuild --clean --platform ios --no-install
+          
+          # Manually install pods so we can catch any hidden errors
+          cd ios
+          pod install --repo-update
           echo "✅ Prebuild and Pod install complete"
 
       - name: Build and create IPA
