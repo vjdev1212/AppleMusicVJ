@@ -1,72 +1,54 @@
 workflows:
-  strmify-ios-build:
-    name: MyApp iOS Build
+  ios-build:
+    name: AppleMusic iOS Build
     environment:
       node: "20"
       xcode: latest
-      groups:
-        - EXPO
+      vars:
+        RCT_NEW_ARCH_ENABLED: 0
     scripts:
       - name: Install dependencies
-        script: npm install --force
+        script: |
+          set -e
+          npm install --force
 
       - name: Install Expo CLI
-        script: npm install -g @expo/cli@latest --force
+        script: |
+          set -e
+          npm install -g @expo/cli@latest --force
 
       - name: Extract app version from app.json
         script: |
+          set -e
           APP_VERSION=$(node -p "require('./app.json').expo.version")
           APP_NAME=$(node -p "require('./app.json').expo.name.replace(/[^a-zA-Z0-9]/g, '')")
           echo "APP_VERSION=$APP_VERSION" >> $CM_ENV
           echo "APP_NAME=$APP_NAME" >> $CM_ENV
           echo "📱 Building: $APP_NAME v$APP_VERSION"
 
-      - name: Prebuild iOS project
+      - name: Prebuild iOS project and Install Pods
         script: |
+          set -e
           rm -rf ios android
-
-          export RCT_NEW_ARCH_ENABLED=1
-
-          npx expo prebuild --clean --platform ios
-
-          echo "✅ Prebuild complete"
-
-      - name: Patch Podfile for New Architecture
-        script: |
+          export RCT_NEW_ARCH_ENABLED=0
+          
+          # Generate the iOS project but skip automatic pod install to make errors visible
+          npx expo prebuild --clean --platform ios --no-install
+          
+          # Manually install pods
           cd ios
-
-          # Fix deployment target
-          sed -i 's/platform :ios, .*/platform :ios, "15.0"/' Podfile
-
-          # Force New Architecture in Podfile
-          cat >> Podfile << 'EOF'
-
-          # Force New Architecture
-          ENV['RCT_NEW_ARCH_ENABLED'] = '1'
-          EOF
-
-          echo "📝 Podfile patched:"
-          cat Podfile
-
-      - name: Install CocoaPods
-        script: |
-          cd ios
-          rm -rf Pods Podfile.lock
-
-          export RCT_NEW_ARCH_ENABLED=1
-
-          echo "📦 Installing CocoaPods..."
           pod install --repo-update
-
-          echo "✅ CocoaPods installed successfully"
+          echo "✅ Prebuild and Pod install complete"
 
       - name: Build and create IPA
         script: |
+          set -e
           cd ios
           WORKSPACE=$(find . -name "*.xcworkspace" -maxdepth 1 | head -1)
 
           if [ -z "$WORKSPACE" ]; then
-            echo "❌ No .xcworkspace found"
+            echo "❌ No .xcworkspace found! This means 'npx expo prebuild' or 'pod install' failed silently."
+            echo "Check the 'Prebuild iOS project and Install Pods' step logs for the actual error."
             exit 1
           fi
 
@@ -76,7 +58,7 @@ workflows:
           echo "🏗️ Building scheme: $SCHEME_NAME"
           mkdir -p build
 
-          export RCT_NEW_ARCH_ENABLED=1
+          export RCT_NEW_ARCH_ENABLED=0
 
           # Build without code signing
           xcodebuild \
@@ -88,14 +70,14 @@ workflows:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="-" \
-            RCT_NEW_ARCH_ENABLED=1
+            RCT_NEW_ARCH_ENABLED=0 | tee xcodebuild.log
 
           # Find the .app
           APP_PATH=$(find build/DerivedData -name "${SCHEME_NAME}.app" -type d | head -1)
 
           if [ -z "$APP_PATH" ]; then
             echo "❌ No .app found"
-            find build/DerivedData -name "*.app" -type d || true
+            echo "Check xcodebuild.log for details."
             exit 1
           fi
 
@@ -113,20 +95,22 @@ workflows:
 
     artifacts:
       - ios/build/*.ipa
+      - ios/xcodebuild.log
 
-  strmify-android-build:
-    name: MyApp Android Build
+  android-build:
+    name: AppleMusic Android Build
     environment:
       node: "20"
       java: latest
-      groups:
-        - EXPO
     scripts:
       - name: Install dependencies
-        script: npm install --force
+        script: |
+          set -e
+          npm install --force
 
       - name: Extract app version from app.json
         script: |
+          set -e
           APP_VERSION=$(node -p "require('./app.json').expo.version")
           APP_NAME=$(node -p "require('./app.json').expo.name.replace(/[^a-zA-Z0-9]/g, '')")
           echo "APP_VERSION=$APP_VERSION" >> $CM_ENV
@@ -134,14 +118,16 @@ workflows:
 
       - name: Clean and generate Android project
         script: |
+          set -e
           rm -rf ios android
           npm install -g @expo/cli@latest --force
           npx expo prebuild --platform android
 
       - name: Build Android APK
         script: |
+          set -e
           cd android
-          ./gradlew assembleRelease -x configureCMakeRelease -Pandroid.overridePathCheck=true
+          ./gradlew assembleRelease -x configureCMakeRelease -Pandroid.overridePathCheck=true --stacktrace
 
           APK_NAME="${APP_NAME}_v${APP_VERSION}_release.apk"
           cp app/build/outputs/apk/release/app-release.apk "../$APK_NAME"
