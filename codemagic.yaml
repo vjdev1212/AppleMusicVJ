@@ -20,59 +20,40 @@ workflows:
 
     scripts:
       - name: Install dependencies
-        script: npm install --force
+        script: |
+          set -e
+          npm install --force
 
       - name: Install Expo CLI
-        script: npm install -g @expo/cli@latest --force
+        script: |
+          set -e
+          npm install -g @expo/cli@latest --force
 
       - name: Extract app version from app.json
         script: |
+          set -e
           APP_VERSION=$(node -p "require('./app.json').expo.version")
           APP_NAME=$(node -p "require('./app.json').expo.name.replace(/[^a-zA-Z0-9]/g, '')")
           echo "APP_VERSION=$APP_VERSION" >> $CM_ENV
           echo "APP_NAME=$APP_NAME" >> $CM_ENV
           echo "📱 Building: $APP_NAME v$APP_VERSION"
 
-      - name: Prebuild iOS project
+      - name: Prebuild iOS project and Install Pods
         script: |
+          set -e
           rm -rf ios android
           export RCT_NEW_ARCH_ENABLED=0
           npx expo prebuild --clean --platform ios
-          echo "✅ Prebuild complete"
-
-      - name: Patch Podfile for Architecture
-        script: |
-          cd ios
-          # Fix deployment target
-          sed -i '' 's/platform :ios, .*/platform :ios, "15.0"/' Podfile || true
-          
-          # Force Architecture in Podfile
-          cat >> Podfile << 'EOF'
-          
-          # Force Old Architecture
-          ENV['RCT_NEW_ARCH_ENABLED'] = '0'
-          EOF
-          
-          echo "📝 Podfile patched:"
-          cat Podfile
-
-      - name: Install CocoaPods
-        script: |
-          cd ios
-          rm -rf Pods Podfile.lock
-          export RCT_NEW_ARCH_ENABLED=0
-          
-          echo "📦 Installing CocoaPods..."
-          pod install --repo-update
-          
-          echo "✅ CocoaPods installed successfully"
+          echo "✅ Prebuild and Pod install complete"
 
       - name: Build and create IPA
         script: |
+          set -e
           cd ios
           WORKSPACE=$(find . -name "*.xcworkspace" -maxdepth 1 | head -1)
           if [ -z "$WORKSPACE" ]; then
-            echo "❌ No .xcworkspace found"
+            echo "❌ No .xcworkspace found! This means 'npx expo prebuild' or 'pod install' failed silently."
+            echo "Check the 'Prebuild iOS project and Install Pods' step logs for the actual error."
             exit 1
           fi
           
@@ -138,10 +119,13 @@ workflows:
 
     scripts:
       - name: Install dependencies
-        script: npm install --force
+        script: |
+          set -e
+          npm install --force
 
       - name: Extract app version from app.json
         script: |
+          set -e
           APP_VERSION=$(node -p "require('./app.json').expo.version")
           APP_NAME=$(node -p "require('./app.json').expo.name.replace(/[^a-zA-Z0-9]/g, '')")
           echo "APP_VERSION=$APP_VERSION" >> $CM_ENV
@@ -149,12 +133,14 @@ workflows:
 
       - name: Clean and generate Android project
         script: |
+          set -e
           rm -rf ios android
           npm install -g @expo/cli@latest --force
           npx expo prebuild --platform android
 
       - name: Build Android APK
         script: |
+          set -e
           cd android
           ./gradlew assembleRelease -x configureCMakeRelease -Pandroid.overridePathCheck=true --stacktrace
 
