@@ -70,7 +70,9 @@
             "newArchEnabled": false
           }
         }
-      ]
+      ],
+      "expo-font",
+      "expo-asset"
     ],
     "extra": {
       "eas": {
